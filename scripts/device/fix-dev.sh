@@ -148,6 +148,12 @@ for f in udev_usb1 udev_usb2 udev_usbctn1 udev_usbctn2; do
     [ -p "/tmp/$f" ] || { rm -f "/tmp/$f"; mkfifo "/tmp/$f"; chmod 666 "/tmp/$f"; }
 done
 
+# RX rbp reads this path through /sys/class/paudiog/paudiog0/connect. On the Pi
+# there is no gadget-audio sysfs node, so the shim rewrites that open to this
+# file and the value stays "disconnected".
+printf '0\n' > /tmp/paudiog0.connect
+chmod 666 /tmp/paudiog0.connect
+
 # --- mtab symlink -----------------------------------------------------------
 #
 # getmntent()/vfs_getfsys go through /etc/mtab, and glibc 2.13 reads it as a

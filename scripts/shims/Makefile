@@ -30,6 +30,11 @@ CFLAGS  := -O2 -march=armv5t -mfloat-abi=soft -fno-stack-protector -fPIC \
            -Wall -Wextra -Wno-unused-parameter
 LDFLAGS := -L$(COMPAT) -L$(RX3LIB) -L$(RX3ULIB) -Wl,-rpath-link,$(RX3LIB):$(RX3ULIB)
 
+# Optional sysroot flags for hosts that have the cross compiler but not the
+# matching armel sysroot headers/libraries in the default toolchain paths.
+CFLAGS  += $(SYSROOT_CFLAGS)
+LDFLAGS += $(SYSROOT_LDFLAGS)
+
 $(COMPAT)/libc_nonshared.a $(COMPAT)/libpthread_nonshared.a:
 	@mkdir -p $(COMPAT)
 	@ar rcs $(COMPAT)/libc_nonshared.a
@@ -44,6 +49,7 @@ $(COMPAT)/libc_nonshared.a $(COMPAT)/libpthread_nonshared.a:
 # be SECOND, before fbshim.so, because both define ioctl and the first one loaded
 # wins. See netshim.c's header and doctor.sh.
 SHARED  := knobshim.so audioshim.so fbshim.so crashcatch.so netshim.so
+ISOC23_COMPAT_OBJ := isoc23_compat.o
 
 # The load order itself, as rb.conf ships it. This is NOT cosmetic: a preloaded
 # library resolves its undefined names against the libraries loaded BEFORE it, so
@@ -250,10 +256,10 @@ CTRL_HDRS  := rbp_abi.h rbp_bridge.h rbp_key.h rbp_led.h led_table.h rbp_vu.h \
               rbp_load.h
 knobshim.so: $(CTRL_OBJS) rbp_key.o shmstate.o fader_state.o rbp_transport.o \
              pitch_state.o keylog.o keylog_state.o $(CTRL_HDRS) rbp_transport.h \
-             pitch_state.h keylog.h keylog_state.h \
+             pitch_state.h keylog.h keylog_state.h $(ISOC23_COMPAT_OBJ) \
              $(COMPAT)/libc_nonshared.a $(COMPAT)/libpthread_nonshared.a
 	$(CC) $(CFLAGS) -shared -o $@ $(CTRL_OBJS) rbp_key.o shmstate.o \
-	    fader_state.o rbp_transport.o pitch_state.o keylog.o keylog_state.o \
+	    fader_state.o rbp_transport.o pitch_state.o keylog.o keylog_state.o $(ISOC23_COMPAT_OBJ) \
 	    -lpthread -lm -lc $(LDFLAGS)
 
 $(CTRL_OBJS): %.o: %.c $(CTRL_HDRS)
@@ -283,9 +289,9 @@ $(CTRL_OBJS): %.o: %.c $(CTRL_HDRS)
 # rbp_vu.c's log10() and rbp_led.c. A host libm here would stamp GLIBC_2.29+
 # references and the shim would refuse to load in the glibc-2.13 chroot.
 audioshim.so: audioshim.o s24pack.o mirror_policy.o master_policy.o \
-              pace_policy.o controllers.o usb_devices.o
+              pace_policy.o controllers.o usb_devices.o $(ISOC23_COMPAT_OBJ)
 	$(CC) $(CFLAGS) -shared -o $@ audioshim.o s24pack.o mirror_policy.o \
-	    master_policy.o pace_policy.o controllers.o usb_devices.o \
+	    master_policy.o pace_policy.o controllers.o usb_devices.o $(ISOC23_COMPAT_OBJ) \
 	    $(RX3LIB)/libdl.so.2 -lm -lc \
 	    $(LDFLAGS)
 
@@ -401,10 +407,10 @@ FBSHIM_HDRS := tscfake.h pointsrc.h point_xform.h touch_zone.h syscalls.h \
 
 fbshim.so: $(FBSHIM_OBJS) rbp_key.o fader_state.o rbp_transport.o pitch_state.o \
            keylog.o keylog_state.o $(FBSHIM_HDRS) rbp_transport.h pitch_state.h \
-           keylog.h keylog_state.h \
+           keylog.h keylog_state.h $(ISOC23_COMPAT_OBJ) \
            $(COMPAT)/libc_nonshared.a $(COMPAT)/libpthread_nonshared.a
 	$(CC) $(CFLAGS) -shared -o $@ $(FBSHIM_OBJS) rbp_key.o fader_state.o \
-	    rbp_transport.o pitch_state.o keylog.o keylog_state.o -lpthread -lm -lc \
+	    rbp_transport.o pitch_state.o keylog.o keylog_state.o $(ISOC23_COMPAT_OBJ) -lpthread -lm -lc \
 	    $(LDFLAGS)
 
 fb_shim.o: fb_shim.c pointsrc.h $(FBSHIM_HDRS)

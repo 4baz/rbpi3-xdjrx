@@ -17,7 +17,7 @@ comfortable; the deploy is not the thing that fills it.
 ## Build (host, WSL/Linux)
 
 [`scripts/build-chroot.sh`](../scripts/build-chroot.sh) assembles the whole
-deploy root and tars it to `work/rbpi4b-pi4.tgz`:
+deploy root and tars it to a profile-specific archive:
 
 1. **RX3 rootfs** (`extracted/XDJRX3-rootfs`) — soft-float glibc 2.13,
    libstdc++, DirectFB, freetype, ALSA, `edb_streamd`, busybox.
@@ -44,13 +44,37 @@ deploy root and tars it to `work/rbpi4b-pi4.tgz`:
    live, so the device needs one `scp`, not two.
 8. Fixes exec bits and the `etc/mtab → /proc/mounts` symlink.
 
-Asset locations come from `RX3` / `DFB` — defaulting to `extracted/` and
-`work/dfb` under the repo root, whatever the current directory is. The output
-goes to `$OUT` (default `work/`).
+Asset locations come from `PROFILE`, profile-specific firmware roots, and
+`DFB`:
+
+- `PROFILE=rx3` (default): `RX3` defaults to `extracted/`, output
+  `work/rbpi4b-pi4.tgz`.
+- `PROFILE=rx`: `RX` defaults to `/Documents/xdj-rx-firmware`, output
+  `work/rbpi4b-pi3-rx.tgz`.
+
+`PROFILE=rx` is an initial native-RX scaffold: it selects RX asset paths and
+chroot naming, and runs a guarded RX binary characterization stage
+([`scripts/patch-rx-rbp.py`](../scripts/patch-rx-rbp.py)). Unknown RX hashes are
+copied through unchanged (no patch words applied). Set
+`RX_REQUIRE_KNOWN_RBP=1` to fail on unknown hashes.
+For device runtime, RX profile auto-selects a connected DDJ/ERGO USB card when
+`RB_AUDIO_DEV` is unset. If no DDJ/ERGO card is present, start-rb falls back to
+Pi HDMI (`hw:CARD=vc4hdmi0,DEV=0`) for bring-up.
+RX profile also defaults `RB_FB_LIE_BPP` to `16` (RX3 remains `32`) to match the
+native RX framebuffer path.
+On Pi-native RX bring-up, fbshim also applies a narrow in-process guard for the
+known low-pointer startup crash path observed in native RX `rbp`.
+
+The output directory is `$OUT` (default `work/`).
 
 ```sh
-RX3=/path/to/extracted DFB=$PWD/work/dfb scripts/build-chroot.sh
+scripts/check-rx-assets.sh /home/baz/Documents/xdj-rx-firmware
+
+PROFILE=rx3 RX3=/path/to/extracted DFB=$PWD/work/dfb scripts/build-chroot.sh
 # -> work/rbpi4b-pi4.tgz
+
+PROFILE=rx RX=/Documents/xdj-rx-firmware DFB=$PWD/work/dfb scripts/build-chroot.sh
+# -> work/rbpi4b-pi3-rx.tgz
 ```
 
 ## Deploy
@@ -61,8 +85,8 @@ one-time (and idempotent) entry point — it untars the deploy root to
 `/opt/rblive4`, puts the device scripts beside it, and runs `fix-dev.sh`:
 
 ```sh
-scp -r work/rbpi4b-pi4.tgz scripts/device pi@<host>:/tmp/
-ssh pi@<host> 'sudo sh /tmp/device/install.sh /tmp/rbpi4b-pi4.tgz'
+scp -r work/<tarball>.tgz scripts/device pi@<host>:/tmp/
+ssh pi@<host> 'sudo sh /tmp/device/install.sh /tmp/<tarball>.tgz'
 ```
 
 `RB_DEPLOY_ROOT` overrides the destination. Re-running upgrades in place.

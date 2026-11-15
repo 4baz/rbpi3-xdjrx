@@ -62,11 +62,95 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
 #define MAX_GPIO_FDS 256
 static char is_gpio_fd[MAX_GPIO_FDS];
+
+/* Native RX builds observed on Pi 3 can pass a bogus low pointer through the
+ * call site at 0x63fe8 (bl 0x679e8), which then crashes on ldr [r0,#0x28] at
+ * 0x679f4 (SIGSEGV addr=0x8b). Guarding the call at 0x63fe0 from "r0 == 0" to
+ * "r0 < 0x1000" keeps valid heap/object pointers unchanged while dropping the
+ * invalid low-address case that cannot be a real object in userspace. */
+static void patch_rx_lowptr_call_guard(void)
+{
+    static int patched = 0;
+    uint32_t *insn = (uint32_t *)0x63fe0;
+    long page_sz;
+    uintptr_t page;
+    uint32_t cmp_lo_4k = 0xe3500a01; /* cmp r0, #0x1000 */
+    uint32_t blo_next = 0x3a000000;  /* blo 0x63fec */
+
+    if (patched)
+        return;
+
+    /* Only touch the native RX player process launched as ld-linux.so.3 rbp.
+     * The same preload set is inherited by helper processes where 0x63fe0 is
+     * not mapped executable text. */
+    {
+        char cmdline[512];
+        ssize_t n = -1;
+        int seen_rbp = 0;
+        int fd = real_open("/proc/self/cmdline", O_RDONLY, 0);
+        if (fd >= 0) {
+            n = real_read(fd, cmdline, sizeof(cmdline) - 1);
+            real_close(fd);
+        }
+        if (n <= 0)
+            return;
+        cmdline[n] = '\0';
+        for (ssize_t i = 0; i < n; ) {
+            size_t len = strlen(&cmdline[i]);
+            if (len == 0) {
+                i++;
+                continue;
+            }
+            if (strcmp(&cmdline[i], "/root/pdj/rbp") == 0) {
+                seen_rbp = 1;
+                break;
+            }
+            i += (ssize_t)len + 1;
+        }
+        if (!seen_rbp)
+            return;
+    }
+
+    page_sz = sysconf(_SC_PAGESIZE);
+    if (page_sz <= 0)
+        return;
+    page = ((uintptr_t)insn) & ~((uintptr_t)page_sz - 1U);
+
+    if (mprotect((void *)page, (size_t)page_sz, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+        return;
+
+    if (insn[0] != 0xe3500000 || insn[1] != 0x0a000000)
+        return;
+
+    insn[0] = cmp_lo_4k;
+    insn[1] = blo_next;
+    __builtin___clear_cache((char *)insn, (char *)(insn + 2));
+    patched = 1;
+}
+
+__attribute__((constructor))
+static void fbshim_init(void)
+{
+    patch_rx_lowptr_call_guard();
+}
+
+/* RX rbp reads these pseudo-files directly and does not tolerate ENOENT. On the
+ * Pi bring-up they are host-managed FIFOs/files in /tmp, so the open path is
+ * rewritten before the real syscall. */
+static const char *path_rewrite(const char *pathname)
+{
+    if (!pathname) return pathname;
+    if (strcmp(pathname, "/proc/udev_usb1") == 0) return "/tmp/udev_usb1";
+    if (strcmp(pathname, "/proc/udev_usb2") == 0) return "/tmp/udev_usb2";
+    if (strcmp(pathname, "/sys/class/paudiog/paudiog0/connect") == 0) return "/tmp/paudiog0.connect";
+    return pathname;
+}
 
 /* The depth rbp is TOLD the fb is, and the line length that goes with it. 32 is
  * the DEFAULT, and it is what rbp is actually run at: it is the depth the
@@ -179,7 +263,10 @@ static void vsync_rate_tick(void)
 
 int open(const char *pathname, int flags, ...)
 {
+    patch_rx_lowptr_call_guard();
+
     mode_t mode = 0;
+    const char *path = path_rewrite(pathname);
     va_list ap;
     if (flags & (O_CREAT | O_TMPFILE)) {
         va_start(ap, flags);
@@ -190,35 +277,86 @@ int open(const char *pathname, int flags, ...)
      * is no such mapping here, and refusing the open is what funnels that mmap
      * into the anonymous-memory path the audio shim then relies on. On a Pi it
      * would fail anyway (CONFIG_STRICT_DEVMEM), but only after a kernel warning. */
-    if (pathname && strcmp(pathname, "/dev/mem") == 0) {
+    if (path && strcmp(path, "/dev/mem") == 0) {
         errno = EACCES;
         return -1;
     }
-    if (pathname && strcmp(pathname, TSC_DEVICE_PATH) == 0)
+    if (path && strcmp(path, TSC_DEVICE_PATH) == 0)
         return tscfake_open();
-    int fd = real_open(pathname, flags, mode);
-    if (fd >= 0 && fd < MAX_GPIO_FDS && pathname && strstr(pathname, "gpiodrv"))
+    int fd = real_open(path, flags, mode);
+    if (fd >= 0 && fd < MAX_GPIO_FDS && path && strstr(path, "gpiodrv"))
         is_gpio_fd[fd] = 1;
     return fd;
 }
 
 int open64(const char *pathname, int flags, ...)
 {
+    patch_rx_lowptr_call_guard();
+
     mode_t mode = 0;
+    const char *path = path_rewrite(pathname);
     va_list ap;
     if (flags & (O_CREAT | O_TMPFILE)) {
         va_start(ap, flags);
         mode = va_arg(ap, mode_t);
         va_end(ap);
     }
-    if (pathname && strcmp(pathname, "/dev/mem") == 0) {
+    if (path && strcmp(path, "/dev/mem") == 0) {
         errno = EACCES;
         return -1;
     }
-    if (pathname && strcmp(pathname, TSC_DEVICE_PATH) == 0)
+    if (path && strcmp(path, TSC_DEVICE_PATH) == 0)
         return tscfake_open();
-    int fd = real_open(pathname, flags | O_LARGEFILE, mode);
-    if (fd >= 0 && fd < MAX_GPIO_FDS && pathname && strstr(pathname, "gpiodrv"))
+    int fd = real_open(path, flags | O_LARGEFILE, mode);
+    if (fd >= 0 && fd < MAX_GPIO_FDS && path && strstr(path, "gpiodrv"))
+        is_gpio_fd[fd] = 1;
+    return fd;
+}
+
+int openat(int dirfd, const char *pathname, int flags, ...)
+{
+    patch_rx_lowptr_call_guard();
+
+    mode_t mode = 0;
+    const char *path = path_rewrite(pathname);
+    va_list ap;
+    if (flags & (O_CREAT | O_TMPFILE)) {
+        va_start(ap, flags);
+        mode = va_arg(ap, mode_t);
+        va_end(ap);
+    }
+    if (path && strcmp(path, "/dev/mem") == 0) {
+        errno = EACCES;
+        return -1;
+    }
+    if (path && strcmp(path, TSC_DEVICE_PATH) == 0)
+        return tscfake_open();
+    int fd = real_openat(dirfd, path, flags, mode);
+    if (fd >= 0 && fd < MAX_GPIO_FDS && path && strstr(path, "gpiodrv"))
+        is_gpio_fd[fd] = 1;
+    return fd;
+}
+
+int openat64(int dirfd, const char *pathname, int flags, ...)
+{
+    patch_rx_lowptr_call_guard();
+
+    mode_t mode = 0;
+    const char *path = path_rewrite(pathname);
+    va_list ap;
+    if (flags & (O_CREAT | O_TMPFILE)) {
+        va_start(ap, flags);
+        mode = va_arg(ap, mode_t);
+        va_end(ap);
+    }
+    if (path && strcmp(path, "/dev/mem") == 0) {
+        errno = EACCES;
+        return -1;
+    }
+    if (path && strcmp(path, TSC_DEVICE_PATH) == 0)
+        return tscfake_open();
+    int fd = real_openat(dirfd, path, flags | O_LARGEFILE, mode);
+    if (fd >= 0 && fd < MAX_GPIO_FDS && path && strstr(path, "gpiodrv"))
         is_gpio_fd[fd] = 1;
     return fd;
 }

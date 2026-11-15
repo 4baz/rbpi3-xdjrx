@@ -347,6 +347,12 @@ extern const struct ctrl_map map_kbd;
  * published DDJ-FLX4 MIDI message list and are unverified until a dump from the
  * unit confirms them -- see the provenance block in map_flx4.c and docs/15. */
 extern const struct ctrl_map map_flx4;
+/* The DDJ-400. Uses the same base table as FLX4 with known wire-level quirks:
+ * Shift+Play note and FX-CH selector shape differ. */
+extern const struct ctrl_map map_ddj400;
+/* The DDJ-ERGO. Experimental: starts from the FLX4 baseline and is intended to
+ * be refined from MIDI_DUMP captures on real hardware. */
+extern const struct ctrl_map map_ergo;
 
 /* The selected MIDI surface's LED table, or NULL if it has none to drive. Defined
  * in ctrlshim.c because that is the only file that knows the selection, and asked

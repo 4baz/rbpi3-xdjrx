@@ -267,6 +267,27 @@ rm -f /tmp/displaywatch.geom
 [ -f "$RBP_LOG" ] && mv -f "$RBP_LOG" "$RBP_LOG.prev"
 [ -f "$EDB_LOG" ] && mv -f "$EDB_LOG" "$EDB_LOG.prev"
 
+# RX profile: prefer a connected DDJ/ERGO USB sound card when AUDIO_DEV is unset.
+# Fall back to HDMI when none is found so bring-up still has a deterministic sink.
+if [ "${RB_RUNTIME_PROFILE:-rx3}" = "rx" ] && [ -z "${RB_AUDIO_DEV:-}" ]; then
+    _rb_ddj_card="$(grep -Ei 'DDJ|ERGO' /proc/asound/cards 2>/dev/null \
+        | sed -n 's/^[[:space:]]*[0-9]\+[[:space:]]\+\[\([^]]\+\)\].*/\1/p' \
+        | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+        | head -n 1)"
+    if [ -n "$_rb_ddj_card" ]; then
+        RB_AUDIO_DEV="hw:CARD=${_rb_ddj_card},DEV=0"
+        [ -n "${RB_AUDIO_FMT:-}" ] || RB_AUDIO_FMT="s24_3le"
+        echo "start-rb: rx audio auto-selected USB card: ${RB_AUDIO_DEV}"
+    else
+        RB_AUDIO_DEV="hw:CARD=vc4hdmi0,DEV=0"
+        [ -n "${RB_AUDIO_FMT:-}" ] || RB_AUDIO_FMT="subframe_le"
+        if [ "${RB_AUDIO_MAP:-}" = "master=0,1;headphones=2,3;booth=-" ]; then
+            RB_AUDIO_MAP="master=0,1;headphones=-;booth=-"
+        fi
+        echo "start-rb: rx audio fallback: ${RB_AUDIO_DEV}"
+    fi
+fi
+
 # --- 6. the shim environment -------------------------------------------------
 #
 # rb.conf's RB_<NAME> becomes <NAME> in the launched environment, which is the
@@ -430,7 +451,7 @@ rb_bootmsg "launching rbp (log: $RBP_LOG)"
 nohup chroot "$RB_CHROOT" env \
       "PATH=/bin:/sbin:/usr/bin:/usr/sbin" \
       "LD_PRELOAD=$RB_LD_PRELOAD" \
-      "$RB_LOADER" "$RB_PLAYER" -a \
+      "$RB_LOADER" "$RB_PLAYER" $RB_PLAYER_ARGS \
       </dev/null >>"$RBP_LOG" 2>&1 &
 
 # Wait for rbp's DeviceSQL channel to come up, detected by it opening the

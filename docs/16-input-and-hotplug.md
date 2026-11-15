@@ -659,7 +659,7 @@ to consume what was arriving.
 
 | Variable | Chooses | Default |
 |---|---|---|
-| `RB_MIDI_MAP` / `MIDI_MAP` | the controller, on the ALSA sequencer: `flx4`, `jp21`, `kbd`, `none` | `flx4` |
+| `RB_MIDI_MAP` / `MIDI_MAP` | the controller, on the ALSA sequencer: `flx4`, `ddj400`, `ergo`, `jp21`, `kbd`, `none` | `flx4` |
 | `RB_EVDEV_MAP` / `EVDEV_MAP` | the non-MIDI surface, on `/dev/input/event*`: `kbd`, `none` | `kbd` |
 
 So a controller, a keyboard and a mouse are all live with no configuration, which

@@ -1,11 +1,13 @@
 #!/bin/bash
-# build-chroot.sh — assemble the soft-float XDJ-RX3 chroot for the Raspberry Pi 4.
+# build-chroot.sh — assemble a soft-float rekordbox chroot for the Pi targets.
 #
-# Run on a Linux host (WSL is fine). Produces work/rbpi4b-pi4.tgz, which holds
+# Run on a Linux host (WSL is fine). Produces a deploy tarball, which holds
 # the complete deploy root, ready for the Pi's install.sh to untar into
 # /opt/rblive4:
 #
-#   rbx3-run/    the soft-float chroot: RX3 rootfs + patched rbp + gui + shims
+#   rbx3-run/    (PROFILE=rx3) soft-float chroot: RX3 rootfs + patched rbp +
+#                gui + shims + patched DirectFB
+#   rbx-run/     (PROFILE=rx) soft-float chroot: RX rootfs + rbp + gui + shims
 #                + the patched DirectFB 1.4.16 stack
 #   rb.conf      the device constants, copied verbatim from scripts/device/
 #
@@ -18,32 +20,70 @@
 #
 # Inputs (all overridable through the environment):
 #
-#   RX3       directory with the extracted firmware tree
+#   PROFILE   runtime profile: rx3 (default) or rx
+#   RX3       PROFILE=rx3 firmware root
 #               $RX3/XDJRX3-rootfs   soft-float userland (from rootfs.cramfs)
 #               $RX3/XDJRX3/gui      the ISO's gui/ dir
 #               $RX3/XDJRX3-gui      gui.tar.gz unpacked (the gui partition)
-#   ROOTFS    explicit rootfs dir                (= $RX3/XDJRX3-rootfs)
+#   RX        PROFILE=rx firmware root (default: /Documents/xdj-rx-firmware)
+#               $RX/XDJRX-rootfs
+#               $RX/XDJRX/gui
+#               $RX/XDJRX-gui
+#   ROOTFS    explicit rootfs dir
 #   GUI       explicit gui root, holding the four asset dirs below
-#                                                (= searched for in both of the
-#                                                   two roots above)
-#   RBPAUDIO  patched player, from tools/patch-rbp (= $RX3/rbp-audio)
+#                                                (= searched for in profile roots)
+#   RBPAUDIO  player input binary
+#               PROFILE=rx3 default: $RX3/rbp-audio (stage-1 patched binary)
+#               PROFILE=rx  default: $RX/rbp (no RX3 patch stage is applied)
 #   DFB       DirectFB 1.4.16 staging, from tools/build-directfb
 #              $DFB/lib/...         core libs + directfb-1.4-6 modules
 #   SHIMS     where the built shims live         (= scripts/shims, built here)
 #   CONF      rb.conf to embed                   (= scripts/device/rb.conf)
 #   OUT       output directory                   (= work)
+#   OUT_TARBALL output tarball name (profile default if unset)
 #
-# Example:
-#   RX3=$PWD/extracted DFB=$PWD/work/dfb scripts/build-chroot.sh
+# Examples:
+#   PROFILE=rx3 RX3=$PWD/extracted DFB=$PWD/work/dfb scripts/build-chroot.sh
+#   PROFILE=rx  RX=/Documents/xdj-rx-firmware DFB=$PWD/work/dfb scripts/build-chroot.sh
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 
-RX3="${RX3:-$REPO/extracted}"
-ROOTFS="${ROOTFS:-$RX3/XDJRX3-rootfs}"
-RBPAUDIO="${RBPAUDIO:-$RX3/rbp-audio}"
+PROFILE="${PROFILE:-rx3}"
+case "$PROFILE" in
+  rx3|rx) ;;
+  *)
+    echo "build-chroot: PROFILE must be 'rx3' or 'rx', not '$PROFILE'" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$PROFILE" = "rx3" ]; then
+  FW_ROOT_DEFAULT="$REPO/extracted"
+  FW_ROOT="${RX3:-$FW_ROOT_DEFAULT}"
+  ROOTFS="${ROOTFS:-$FW_ROOT/XDJRX3-rootfs}"
+  RBPAUDIO="${RBPAUDIO:-$FW_ROOT/rbp-audio}"
+  GUI_ROOTS_DEFAULT="$FW_ROOT/XDJRX3/gui $FW_ROOT/XDJRX3-gui"
+  CHROOT_HINT="rbx3-run"
+  PROFILE_LABEL="XDJ-RX3"
+  GUI_REQUIRED_DIRS="pset system"
+  GUI_OPTIONAL_DIRS="fontdata imagedata"
+  GUI_REQUIRED_NOTE="/root/gui/pset/* and /root/gui/system/*"
+else
+  FW_ROOT_DEFAULT="/Documents/xdj-rx-firmware"
+  FW_ROOT="${RX:-$FW_ROOT_DEFAULT}"
+  ROOTFS="${ROOTFS:-$FW_ROOT/XDJRX-rootfs}"
+  RBPAUDIO="${RBPAUDIO:-$FW_ROOT/rbp}"
+  GUI_ROOTS_DEFAULT="$FW_ROOT/XDJRX/gui $FW_ROOT/XDJRX-gui"
+  CHROOT_HINT="rbx-run"
+  PROFILE_LABEL="XDJ-RX"
+  GUI_REQUIRED_DIRS="pset pioneer"
+  GUI_OPTIONAL_DIRS="fontdata imagedata"
+  GUI_REQUIRED_NOTE="/root/gui/pset/* and /root/gui/pioneer/*"
+fi
+
 DFB="${DFB:-$REPO/work/dfb}"
 DFBLIB="${DFBLIB:-$DFB/lib}"
 SHIMS="${SHIMS:-$HERE/shims}"
@@ -63,6 +103,13 @@ SHIMS="${SHIMS:-$HERE/shims}"
 DFB_MODDIR="${DFB_MODDIR:-/usr/lib/directfb-1.4-6}"
 CONF="${CONF:-$HERE/device/rb.conf}"
 OUT="${OUT:-$REPO/work}"
+if [ -z "${OUT_TARBALL:-}" ]; then
+  if [ "$PROFILE" = "rx3" ]; then
+    OUT_TARBALL="rbpi4b-pi4.tgz"
+  else
+    OUT_TARBALL="rbpi4b-pi3-rx.tgz"
+  fi
+fi
 
 # The four gui asset directories are split across two roots, and neither root is
 # a gui tree on its own -- so they are resolved one directory at a time.
@@ -87,12 +134,19 @@ OUT="${OUT:-$REPO/work}"
 if [ -n "${GUI:-}" ]; then
   GUI_ROOTS="$GUI"                       # explicit root: all four, or it fails below
 else
-  GUI_ROOTS="$RX3/XDJRX3/gui $RX3/XDJRX3-gui"
+  GUI_ROOTS="$GUI_ROOTS_DEFAULT"
 fi
 
 GUI_DIRS=""
 GUI_MISSING=""
-for d in pset system fontdata imagedata; do
+gui_is_required() {
+  want="$1"
+  for req in $GUI_REQUIRED_DIRS; do
+    [ "$req" = "$want" ] && return 0
+  done
+  return 1
+}
+for d in $GUI_REQUIRED_DIRS $GUI_OPTIONAL_DIRS; do
   src=""
   for root in $GUI_ROOTS; do
     if [ -d "$root/$d" ]; then src="$root/$d"; break; fi
@@ -100,22 +154,26 @@ for d in pset system fontdata imagedata; do
   if [ -n "$src" ]; then
     GUI_DIRS="$GUI_DIRS $src"
   else
-    case "$d" in
-      pset|system) GUI_MISSING="$GUI_MISSING $d" ;;
-      *) echo "[gui] $d: in neither $GUI_ROOTS -- optional, rbp does not open it" ;;
-    esac
+    if gui_is_required "$d"; then
+      GUI_MISSING="$GUI_MISSING $d"
+    else
+      echo "[gui] $d: in neither $GUI_ROOTS -- optional, rbp does not open it"
+    fi
   fi
 done
 if [ -n "$GUI_MISSING" ]; then
   echo "build-chroot: gui assets missing:$GUI_MISSING" >&2
-  echo "  rbp opens /root/gui/pset/fontdata/*.bin," >&2
-  echo "  /root/gui/pset/imagedata/imagedata.dat and" >&2
-  echo "  /root/gui/system/fontdata/sazanami-gothic.ttf, so pset/ and system/" >&2
-  echo "  are required.  Both come from the firmware's images/gui.tar.gz --" >&2
-  echo "  the tarball the RX3 formats its gui partition from.  Searched:" >&2
+  echo "  required gui paths for $PROFILE_LABEL: $GUI_REQUIRED_NOTE" >&2
+  echo "  Searched:" >&2
   for root in $GUI_ROOTS; do echo "    $root" >&2; done
-  echo "  extract it:  mkdir -p $RX3/XDJRX3-gui &&" >&2
-  echo "               tar -C $RX3/XDJRX3-gui -xzf $RX3/XDJRX3/images/gui.tar.gz" >&2
+  if [ "$PROFILE" = "rx3" ]; then
+    echo "  Both come from the firmware's images/gui.tar.gz -- the tarball the" >&2
+    echo "  RX3 formats its gui partition from." >&2
+    echo "  extract it:  mkdir -p $FW_ROOT/XDJRX3-gui &&" >&2
+    echo "               tar -C $FW_ROOT/XDJRX3-gui -xzf $FW_ROOT/XDJRX3/images/gui.tar.gz" >&2
+  else
+    echo "  set GUI= to a root that contains pset/ and pioneer/ for RX assets." >&2
+  fi
   exit 1
 fi
 
@@ -131,12 +189,12 @@ for f in "$ROOTFS" "$RBPAUDIO" \
   [ -e "$f" ] || missing="$missing $f"
 done
 if [ -n "$missing" ]; then
-  echo "build-chroot: missing required assets:" >&2
+  echo "build-chroot: missing required assets for $PROFILE_LABEL ($PROFILE):" >&2
   for f in $missing; do echo "  $f" >&2; done
   echo >&2
   echo "obtain the extracted assets (docs/04-firmware-assets.md), patch the" >&2
   echo "player if needed (tools/patch-rbp/) and build DirectFB" >&2
-  echo "(tools/build-directfb/); set RX3= / DFB= as needed." >&2
+  echo "(tools/build-directfb/); set PROFILE= and RX3=/RX=/DFB= as needed." >&2
   exit 1
 fi
 
@@ -144,7 +202,9 @@ fi
 for so in knobshim.so audioshim.so fbshim.so; do
   if [ ! -f "$SHIMS/$so" ]; then
     echo "== building shims (make -C scripts/shims) =="
-    make -C "$SHIMS" RX3="$ROOTFS"
+    make -C "$SHIMS" RX3="$ROOTFS" \
+      SYSROOT_CFLAGS="${SHIM_SYSROOT_CFLAGS:---sysroot=$ROOTFS}" \
+      SYSROOT_LDFLAGS="${SHIM_SYSROOT_LDFLAGS:---sysroot=$ROOTFS}"
     break
   fi
 done
@@ -159,7 +219,19 @@ trap 'rm -rf "$STAGE"' EXIT
 
 # The stage is the *deploy root*: the chroot is a subdirectory of it, next to
 # rb.conf. install.sh untars this straight into /opt/rblive4.
-CHROOT="$STAGE/rbx3-run"
+if [ ! -f "$CONF" ]; then
+  echo "build-chroot: rb.conf not found at $CONF (set CONF=)" >&2
+  exit 1
+fi
+RB_CHROOT_CONF="$(RB_RUNTIME_PROFILE="$PROFILE" . "$CONF"; printf '%s' "${RB_CHROOT:-$RB_DEPLOY_ROOT/$CHROOT_HINT}")"
+CHROOT_NAME="$(basename "$RB_CHROOT_CONF")"
+case "$CHROOT_NAME" in
+  ''|'.'|'..')
+    echo "build-chroot: refusing invalid RB_CHROOT '$RB_CHROOT_CONF' in $CONF" >&2
+    exit 1
+    ;;
+esac
+CHROOT="$STAGE/$CHROOT_NAME"
 mkdir -p "$CHROOT"
 
 echo "== staging to $STAGE =="
@@ -172,7 +244,7 @@ echo "== staging to $STAGE =="
 #    refuses to run at all ("Option --ignore-failed-read is not supported"),
 #    which is how this script failed on macOS, so probe for it rather than
 #    assume it: the Linux behaviour is then unchanged.
-echo "[1/7] copying RX3 rootfs..."
+echo "[1/7] copying $PROFILE_LABEL rootfs..."
 if tar --version 2>/dev/null | head -1 | grep -q GNU; then
   TAR_IGNORE="--ignore-failed-read"
 else
@@ -197,31 +269,40 @@ done
 find "$CHROOT/root/gui" -name '.DS_Store' -type f -delete 2>/dev/null || true
 ls -d "$CHROOT/root/gui"/*/ | sed 's/^/    /'
 
-# 3. patched player -> /root/pdj/rbp  (shared patches + the SC Live 4
-#    getPcController() NULL-deref fix + the layer pixel format; see
-#    scripts/patch-rbp-nopc.py and scripts/patch-rbp-depth.py)
+# 3. player -> /root/pdj/rbp
 #
-# The depth stage is not optional and not independent: the player's
-# DS_HW_Core_Layer_Create format word and the shim's FBIOGET_VSCREENINFO lie must
-# say the same thing, and the lie is read from the rb.conf this build embeds. So
-# the value is taken from that same file rather than assumed, and the pair cannot
-# disagree in a tarball. `RB_FB_LIE_BPP=16 scripts/build-chroot.sh` still produces
-# the whole 16-bpp unit -- it is the same command with the one variable moved.
-if [ ! -f "$CONF" ]; then
-  echo "build-chroot: rb.conf not found at $CONF (set CONF=)" >&2
-  exit 1
-fi
-RB_FB_LIE_BPP="$(. "$CONF"; printf '%s' "${RB_FB_LIE_BPP:-32}")"
-case "$RB_FB_LIE_BPP" in
-  32|16) ;;
-  *) echo "build-chroot: RB_FB_LIE_BPP must be 16 or 32, not '$RB_FB_LIE_BPP'" >&2
-     exit 1;;
-esac
-echo "[3/7] patching + installing rbp (RB_FB_LIE_BPP=$RB_FB_LIE_BPP)..."
+# PROFILE=rx3: apply the RX3-specific second/third stage patch pair.
+# PROFILE=rx: run guarded RX characterization and copy-through. Unknown RX
+# signatures are allowed by default but never patched; set
+# RX_REQUIRE_KNOWN_RBP=1 to fail the build on unknown md5.
+echo "[3/7] installing rbp for profile '$PROFILE'..."
 mkdir -p "$CHROOT/root/pdj"
-"${PYTHON:-python3}" "$HERE/patch-rbp-nopc.py" "$RBPAUDIO" -o "$CHROOT/root/pdj/rbp"
-"${PYTHON:-python3}" "$HERE/patch-rbp-depth.py" "$CHROOT/root/pdj/rbp" \
-                    --bpp "$RB_FB_LIE_BPP"
+if [ "$PROFILE" = "rx3" ]; then
+  # The depth stage is not optional and not independent: the player's
+  # DS_HW_Core_Layer_Create format word and the shim's FBIOGET_VSCREENINFO lie
+  # must say the same thing, and the lie is read from the rb.conf this build
+  # embeds. So the value is taken from that same file rather than assumed.
+  RB_FB_LIE_BPP="$(. "$CONF"; printf '%s' "${RB_FB_LIE_BPP:-32}")"
+  case "$RB_FB_LIE_BPP" in
+    32|16) ;;
+    *) echo "build-chroot: RB_FB_LIE_BPP must be 16 or 32, not '$RB_FB_LIE_BPP'" >&2
+       exit 1;;
+  esac
+  "${PYTHON:-python3}" "$HERE/patch-rbp-nopc.py" "$RBPAUDIO" -o "$CHROOT/root/pdj/rbp"
+  "${PYTHON:-python3}" "$HERE/patch-rbp-depth.py" "$CHROOT/root/pdj/rbp" \
+                      --bpp "$RB_FB_LIE_BPP"
+else
+  RX_META="$STAGE/rx-rbp-characterization.json"
+  RX_GUARD_ARGS=""
+  if [ "${RX_REQUIRE_KNOWN_RBP:-0}" = "1" ]; then
+    RX_GUARD_ARGS="--require-known"
+  fi
+  # shellcheck disable=SC2086
+  "${PYTHON:-python3}" "$HERE/patch-rx-rbp.py" "$RBPAUDIO" \
+                      -o "$CHROOT/root/pdj/rbp" \
+                      --metadata-out "$RX_META" \
+                      $RX_GUARD_ARGS
+fi
 
 # 4. shims -> usr/lib (LD_PRELOAD names) and root/pdj
 echo "[4/7] installing shims..."
@@ -299,6 +380,12 @@ if [ ! -f "$CONF" ]; then
   exit 1
 fi
 cp "$CONF" "$STAGE/rb.conf"
+if [ "$PROFILE" = "rx" ]; then
+  # Ship explicit profile + chroot override. rb.conf computes RB_CHROOT near the
+  # top from the current RB_RUNTIME_PROFILE, so setting only profile later in
+  # the file would not recompute RB_CHROOT.
+  printf '\nRB_RUNTIME_PROFILE=rx\nRB_CHROOT=${RB_DEPLOY_ROOT}/rbx-run\nRB_PLAYER_ARGS=\n' >> "$STAGE/rb.conf"
+fi
 
 # Identity pointing calibration. rbp reads these and applies an affine to
 # whatever coordinates the panel path hands it, so they must be the identity for
@@ -360,11 +447,11 @@ if command -v file >/dev/null 2>&1; then
   file "$CHROOT/lib/ld-2.13.so" "$CHROOT/bin/busybox" "$CHROOT/root/pdj/rbp" | sed 's#.*: #  #'
 fi
 
-echo "== tar -> $OUT/rbpi4b-pi4.tgz =="
+echo "== tar -> $OUT/$OUT_TARBALL =="
 mkdir -p "$OUT"
-tar -C "$STAGE" -czf "$OUT/rbpi4b-pi4.tgz" .
-echo "== done: $(du -h "$OUT/rbpi4b-pi4.tgz" | cut -f1) =="
+tar -C "$STAGE" -czf "$OUT/$OUT_TARBALL" .
+echo "== done: $(du -h "$OUT/$OUT_TARBALL" | cut -f1) =="
 echo
 echo "deploy on the Pi:"
-echo "  scp $OUT/rbpi4b-pi4.tgz pi@<host>:/tmp/"
-echo "  ssh pi@<host> 'sudo sh /path/to/install.sh /tmp/rbpi4b-pi4.tgz'"
+echo "  scp $OUT/$OUT_TARBALL pi@<host>:/tmp/"
+echo "  ssh pi@<host> 'sudo sh /path/to/install.sh /tmp/$OUT_TARBALL'"

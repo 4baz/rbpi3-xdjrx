@@ -1,6 +1,6 @@
 # scripts/device/
 
-Everything that runs **on the Raspberry Pi 4**, as root.
+Everything that runs **on the Raspberry Pi target**, as root.
 
 Note where these come from, because it is not the tarball: the deploy tarball
 carries only `rb.conf` and the `rbx3-run/` chroot, and `install.sh` — which is
@@ -30,12 +30,12 @@ below into the deploy root (`/opt/rblive4` by default). So a unit needs
 ├── vncserve/        the viewer itself: sources + the binary built HERE, on the unit
 ├── log/             rbp.log, edb_streamd.log, usbwatch.log, displaywatch.log, vncserve.log
 ├── media/usb1/sda1  where a stick is mounted (host side)
-└── rbx3-run/        the soft-float ARM32 chroot: player, shims, DirectFB
+└── rbx3-run/        default soft-float ARM32 chroot (or rbx-run for PROFILE=rx)
 ```
 
 | Script | Purpose |
 |---|---|
-| `install.sh` | Untars the deploy root, checks `rb.conf`, proves the chroot can execute a 32-bit binary, checks `/dev/fb0` and `/dev/snd/seq`, then runs `fix-dev.sh`. Run once per deploy. `install.sh doctor` runs `doctor.sh` instead. |
+| `install.sh` | Untars the deploy root, checks `rb.conf`, validates the profile's chroot directory from `RB_CHROOT`, proves the chroot can execute a 32-bit binary, checks `/dev/fb0` and `/dev/snd/seq`, then runs `fix-dev.sh`. Run once per deploy. `install.sh doctor` runs `doctor.sh` instead. |
 | `doctor.sh` | Checks a *deployed* unit and reports. **Changes nothing** — no write, no mount, no module, no service call; the one thing it executes is a chroot'd `busybox echo`. Its headline check is the one this tree has most often got wrong: every shim's deployed build against **the copy `rbp` is actually loading**, read out of the running process's `/proc/<pid>/maps`. Prints one paste-ready fix block and exits 1 if anything failed. Every path it knows comes out of `rb.conf` and `lib.sh`, so it cannot drift from them. |
 | `fix-dev.sh` | Binds `/dev /proc /sys /tmp` into the chroot, creates the device stubs rbp expects, the `/tmp/udev_*` FIFOs and the `etc/mtab` symlink. Run after **every** reboot. |
 | `start-rb.sh` | Stops the services that would fight for the display or the stick (each behind a read-only guard, so the steady state reloads nothing), kills stale processes, runs `fix-dev.sh`, translates `rb.conf` into the shim environment, starts `edb_streamd` then `rbp`, waits for rbp to open its USB FIFO, records the display baseline, starts both watchers, then waits for rbp to exit. |

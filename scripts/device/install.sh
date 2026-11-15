@@ -1,5 +1,5 @@
 #!/bin/sh
-# install.sh — deploy rbpi4b onto a Raspberry Pi 4.
+# install.sh — deploy rbpi4b onto a Raspberry Pi target.
 #
 # Run as root on the Pi:
 #
@@ -78,7 +78,6 @@ say "deploying to $DEPLOY"
 mkdir -p "$DEPLOY"
 tar -C "$DEPLOY" -xzf "$TARBALL"
 
-[ -d "$DEPLOY/rbx3-run" ] || die "tarball did not contain rbx3-run/ -- is it a rbpi4b-pi4.tgz?"
 [ -f "$DEPLOY/rb.conf" ]  || die "tarball did not contain rb.conf -- rebuild with scripts/build-chroot.sh"
 
 # rb.conf's location on the device is the authority from here on: it is what the
@@ -104,6 +103,8 @@ fi
 
 CHROOT="${RB_CHROOT:-$DEPLOY/rbx3-run}"
 LOG_DIR="${RB_LOG_DIR:-$DEPLOY/log}"
+
+[ -d "$CHROOT" ] || die "tarball did not contain $(basename "$CHROOT")/ -- rebuild with scripts/build-chroot.sh"
 
 mkdir -p "$LOG_DIR" "${RB_MEDIA_MOUNT:-$DEPLOY/media/usb1}" \
                    "${RB_MEDIA_MOUNT2:-$DEPLOY/media/usb2}"

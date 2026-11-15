@@ -123,6 +123,7 @@
  */
 #define _GNU_SOURCE
 #include <stdint.h>         /* uint32_t, for the two mixer-route words */
+#include <string.h>
 #include <sound/asequencer.h>
 
 #include "shimutil.h"
@@ -189,6 +190,7 @@
 #define N_MODE_PFX1  30   /* 2nd -> AUTO BEAT LOOP (RX3 position 2) (+SHIFT 107) */
 #define N_MODE_JUMP  32   /* 3rd -> SLIP BEAT LOOP (RX3 position 3) (+SHIFT 109) */
 #define N_MODE_SMPL  34   /* 4th -> BEAT JUMP      (RX3 position 4) (+SHIFT 111) */
+#define N_SLIP_DDJ400 71  /* DDJ-400: SHIFT+PLAY note; maps to rbp's SLIP */
 
 /* ---- mixer / browse (all on list ch 7 unless noted) ---------------------- */
 #define N_MASTER_CUE  99  /* MASTER CUE         (+SHIFT 120) */
@@ -373,6 +375,13 @@ static struct pitch_ctrl pitch_state[2] = {
 static int fxch_leg1, fxch_leg2;
 static int fxch_pos = -1;       /* 0 = CH1, 1 = CH2, 2 = CH1&CH2; -1 = unread */
 
+enum flx_profile {
+     FLX_PROFILE_FLX4 = 0,
+     FLX_PROFILE_DDJ400,
+     FLX_PROFILE_ERGO,
+};
+static enum flx_profile flx_profile = FLX_PROFILE_FLX4;
+
 /* ---- the note table's dispatch ------------------------------------------ */
 
 /* A control rbp has no code for: logged, and otherwise ignored. Used for the
@@ -462,7 +471,29 @@ static void flx4_note(int ch, int note, int on)
           return;
      }
 
-     /* FX CH SELECT (list ch 5/6 notes 16/17): see the leg note above. */
+     /* DDJ-400 FX CH SELECT: three direct buttons on list ch 5.
+      * (ch5,n16)->CH1, (ch5,n17)->CH2, (ch5,n20)->MASTER. */
+     if (flx_profile == FLX_PROFILE_DDJ400 && ch == CH_FXA &&
+         (note == N_FXCH_1 || note == N_FXCH_2 || note == 20) && on) {
+          int pos;
+          if (note == N_FXCH_1)
+               pos = 0;
+          else if (note == N_FXCH_2)
+               pos = 1;
+          else
+               pos = 2;
+          if (pos == fxch_pos)
+               return;
+          fxch_pos = pos;
+          send_rx_key(K_BFXCH, OP_VALUE, CH_GLOBAL,
+                      (pos == 2) ? BFX_CH_MASTER : pos);
+          klog("knobshim2: FX CH SELECT -> Beat FX target %s\n",
+               pos == 2 ? "MASTER (5)" :
+               (pos == 0 ? "deck 1 (0)" : "deck 2 (1)"));
+          return;
+     }
+
+     /* FLX4 FX CH SELECT (list ch 5/6 notes 16/17): see the leg note above. */
      if ((ch == CH_FXA || ch == CH_FXB) &&
          (note == N_FXCH_1 || note == N_FXCH_2)) {
           int pos;
@@ -908,6 +939,15 @@ static void flx4_build(void)
      jog_verbose = env_on("JOG_VERBOSE", 0);
      tempo_verbose = env_on("TEMPO_VERBOSE", 0);
      tempo_rev = env_on("TEMPO_REV", 0);
+     {
+          const char *midi_map = env_text("MIDI_MAP", "flx4");
+          if (strcmp(midi_map, "ddj400") == 0)
+               flx_profile = FLX_PROFILE_DDJ400;
+          else if (strcmp(midi_map, "ergo") == 0)
+               flx_profile = FLX_PROFILE_ERGO;
+          else
+               flx_profile = FLX_PROFILE_FLX4;
+     }
 
      /* ---- decks (list ch 1/2 -> rch 0/1 -> rbp players 1/2) ----
       * Every control on these two channels is a button; the continuous ones
@@ -953,6 +993,8 @@ static void flx4_build(void)
           add_note(rch, N_MODE_PFX1, K_ALOOP, sch);
           add_note(rch, N_MODE_JUMP, K_SLIPLOOP, sch);
           add_note(rch, N_MODE_SMPL, K_BEATJUMP, sch);
+          if (flx_profile == FLX_PROFILE_DDJ400)
+               add_note(rch, N_SLIP_DDJ400, K_SLIP, sch);
           /* Known, deliberately not routed (key 0): the SHIFT button and
            * CUE/LOOP CALL > -- rbp's keycode for the call buttons is not
            * identified. See docs/15's open questions. */
@@ -1117,26 +1159,10 @@ static void flx4_startup(void)
      *(volatile uint32_t *)ADDR_MIXER_ROUTE_PLAYER1 = MIXER_ROUTE_INPUT1;
      klog("knobshim2: routed Mixer Ch1 -> Deck1, Ch2 -> Deck2\n");
 
-     /* Sound Color FX needs a *type* selected behind the knob or the CFX knobs
-      * move a control with no effect behind them. The FLX4 has no CFX type
-      * buttons -- one knob per channel -- so the map chooses at startup, as the
-      * previous map does, and centres both knobs. Filter is the choice because
-      * it is the one effect a single knob can express without a parameter.
-      * TODO: unverified -- with no way to change it from the unit, this is a
-      * fixed choice, not something the operator can correct. */
-     send_rx_key(K_FILTER, OP_PRESS, 1, 0);
-     send_rx_key(K_FILTER, OP_RELEASE, 1, 0);
-     send_rx_key(K_FILTER, OP_PRESS, 2, 0);
-     send_rx_key(K_FILTER, OP_RELEASE, 2, 0);
-     send_rx_key_f(K_COLOR, OP_VALUE, 1, 512, 0.5f);
-     send_rx_key_f(K_COLOR, OP_VALUE, 2, 512, 0.5f);
-     klog("knobshim2: Sound Color FX initialized to Filter on Ch1 & Ch2\n");
-
-     /* rbp's internal master level to unity, for the reason in flx4_build()'s
-      * note on MASTER LEVEL: the unit's own knob is the master volume, so rbp's
-      * must sit at a fixed reference or the master is attenuated twice. */
-     send_rx_key_f(K_MASTERLVL, OP_VALUE, CH_GLOBAL, 1023, 1.0f);
-     klog("knobshim2: master level set to unity\n");
+     /* On RX bring-up, forcing startup key sends here can block controller input
+      * setup before the sequencer is even subscribed. Keep only the mixer-route
+      * initialization in this one-shot startup path. */
+     klog("knobshim2: FLX4 startup: skipping key-init sends; runtime events drive key path\n");
 
      /* Deliberately NOT here: me_set_master_cue() / me_set_stereo(). rbp_vu.c's
       * vu_thread() waits for rbp's mixer and asserts both on every target --
@@ -1392,5 +1418,27 @@ const struct ctrl_map map_flx4 = {
      flx4_tick,
      NULL,   /* devices(): a MIDI surface, so no evdev reader is started */
      NULL,   /* input(): ditto -- this map never sees an evdev triple */
+     &flx4_leds,
+};
+
+const struct ctrl_map map_ddj400 = {
+     "ddj400",
+     flx4_build,
+     flx4_startup,
+     flx4_event,
+     flx4_tick,
+     NULL,
+     NULL,
+     &flx4_leds,
+};
+
+const struct ctrl_map map_ergo = {
+     "ergo",
+     flx4_build,
+     flx4_startup,
+     flx4_event,
+     flx4_tick,
+     NULL,
+     NULL,
      &flx4_leds,
 };

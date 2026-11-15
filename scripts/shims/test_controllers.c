@@ -67,7 +67,7 @@ static int checks, failures;
 /* The maps this build has, as ctrlshim.c's midi_maps[]/evdev_maps[] spell them.
  * A COPY, and the header above says which direction that leaves unguarded. */
 static const char *const maps_the_build_has[] = {
-    "flx4", "jp21", "kbd", "none",
+    "flx4", "ddj400", "ergo", "jp21", "kbd", "none",
 };
 
 static int is_a_map(const char *name)
@@ -269,8 +269,8 @@ static void test_the_unknowns_stay_unknown(void)
     CHECK(controllers_by_hint("SC Live 4 MIDI 1") == NULL,
           "the JP21 has no hint, so its own port name must NOT find it by "
           "name -- it is reached on the rawmidi route");
-    CHECK(controllers_by_hint("DDJ-400 MIDI 1") == NULL,
-          "a controller this build has no row for matches nothing");
+    CHECK(controllers_by_hint("DDJ-400 MIDI 1") == controllers_find("ddj400"),
+          "DDJ-400's hint should resolve to its own row");
 }
 
 /* ---------------------------------------------------------------------------
@@ -280,6 +280,8 @@ static void test_the_unknowns_stay_unknown(void)
 static void test_find_and_hint(void)
 {
     const struct controller *f = controllers_find("flx4");
+    const struct controller *d400 = controllers_find("ddj400");
+    const struct controller *ergo = controllers_find("ergo");
 
     /* find() is case-SENSITIVE, because it is the same comparison ctrlshim.c's
      * pick_map() makes against a map's name -- so "which controller" and "which
@@ -294,6 +296,8 @@ static void test_find_and_hint(void)
     CHECK(controllers_find("Flx4") == NULL, "find() must be case-sensitive");
     CHECK(controllers_find("ddj-flx4") == NULL,
           "the USB product name is not the id");
+    CHECK(d400 != NULL, "DDJ-400 must have a row");
+    CHECK(ergo != NULL, "DDJ-ERGO must have a row");
 
     /* kbd and none are MAPS with no row: they must not be findable, because a
      * caller that got a row back would take the FLX4's card and port facts for
@@ -313,6 +317,10 @@ static void test_find_and_hint(void)
           "the port-name match must be case-insensitive too");
     CHECK(controllers_by_hint("DDJ-FLX4:DDJ-FLX4 MIDI 1") == f,
           "the doubled client:port spelling must match as well");
+    CHECK(controllers_by_hint("Pioneer DDJ-400 MIDI 1") == d400,
+          "DDJ-400 must be found by its sequencer-name hint");
+    CHECK(controllers_by_hint("PIONEER DDJ-ERGO MIDI 1") == ergo,
+          "DDJ-ERGO must be found by its sequencer-name hint");
     CHECK(controllers_by_hint("flx") == NULL,
           "the hint is the needle and the port name the haystack, so a port "
           "name shorter than the hint is not a match");
@@ -322,6 +330,8 @@ static void test_find_and_hint(void)
      * not use, and quietly accepting it would hide the difference. */
     CHECK(f && controllers_by_usb("2b73:0045") == f,
           "the FLX4's USB id must find its row");
+    CHECK(d400 && controllers_by_usb("2b73:0017") == d400,
+          "the DDJ-400's USB id must find its row");
     CHECK(controllers_by_usb("2B73:0045") == NULL,
           "the USB match must be exact and lowercase");
     CHECK(controllers_by_usb(NULL) == NULL, "a NULL USB id matches nothing");
@@ -352,6 +362,7 @@ static void test_default(void)
 static void test_sysex(void)
 {
     const struct controller *f = controllers_find("flx4");
+    const struct controller *d400 = controllers_find("ddj400");
     const struct controller *j = controllers_find("jp21");
 
     /* The FLX4's keepalive, as the sibling port records it. Pinned byte for byte
@@ -372,6 +383,27 @@ static void test_sysex(void)
                   memcmp(f->keepalive, want, sizeof want) == 0,
                   "the FLX4's keepalive payload must be the sibling's twelve "
                   "bytes");
+        }
+
+        /* DDJ-400: no keepalive, one startup SysEx request. */
+        {
+            static const unsigned char want[12] = {
+                0xF0, 0x00, 0x40, 0x05, 0x00, 0x00,
+                0x02, 0x06, 0x00, 0x03, 0x01, 0xF7
+            };
+
+            CHECK(d400 && d400->init != NULL, "the DDJ-400 must carry its startup SysEx");
+            if (d400 && d400->init) {
+                CHECK(d400->init_len == sizeof want,
+                      "the DDJ-400 init is %u bytes, not %u",
+                      d400->init_len, (unsigned)sizeof want);
+                CHECK(d400->init_len == sizeof want &&
+                      memcmp(d400->init, want, sizeof want) == 0,
+                      "the DDJ-400 startup SysEx payload must match the sibling table");
+            }
+            CHECK(d400 && d400->keepalive == NULL && d400->keepalive_len == 0 &&
+                  d400->keepalive_ms == 0,
+                  "the DDJ-400 wants no keepalive");
         }
         CHECK(f && f->keepalive_ms == 200,
               "the FLX4's keepalive period must be 200 ms, not %u",

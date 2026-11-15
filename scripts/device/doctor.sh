@@ -313,41 +313,55 @@ _rbp_build() {
 }
 
 RBP_INSTALLED="$RB_CHROOT/root/pdj/rbp"
-if [ ! -f "$RBP_INSTALLED" ]; then
-	bad "the player is missing: $RBP_INSTALLED"
-	fix "# scripts/build-chroot.sh stages it; or tools/patch-rbp/rbp_patch.py <stock> -o rbp-audio && scripts/patch-rbp-nopc.py rbp-audio -o rbp-nopc"
-else
-	_rbp_sum=$(_md5 "$RBP_INSTALLED")
-	_rbp_want=$(_rbp_final_for_depth)
-	if [ "$_rbp_sum" = "$_rbp_want" ]; then
-		ok "player presents as our final build for RB_FB_LIE_BPP=${RB_FB_LIE_BPP:-32}: $_rbp_sum"
-	elif [ "$_rbp_sum" = "$RB_RBP_FINAL16" ] || [ "$_rbp_sum" = "$RB_RBP_FINAL32" ]; then
-		# Ours, complete, and at the other depth. This is not a corrupt player, so
-		# it must not be reported as one -- but it is also not runnable: the pair
-		# has to agree, and start-rb.sh refuses this one on purpose.
-		_rbp_d=$(_rbp_depth "$RBP_INSTALLED")
-		bad "the installed player is our final build, but at ${_rbp_d} bpp, and"
-		bad "RB_FB_LIE_BPP=${RB_FB_LIE_BPP:-32} -- start-rb.sh will refuse to launch it"
-		note "$RBP_INSTALLED is $_rbp_sum ($(_rbp_build "$_rbp_sum"))"
-		note "the layer pixel format and the shim's FBIOGET_VSCREENINFO lie must agree;"
-		note "DirectFB's layer plugin refuses a mismatched pair and rbp dies before the"
-		note "panel opens, with nothing in rbp.log that names the depth."
-		fix "# move ONE half of the pair:"
-		fix "#   echo RB_FB_LIE_BPP=$_rbp_d >> $RB_DEPLOY_ROOT/rb.local.conf   # match the lie to the player"
-		fix "#   or install a ${RB_FB_LIE_BPP:-32}-bpp player here (on the host:"
-		fix "#       python3 scripts/patch-rbp-depth.py <player> --bpp ${RB_FB_LIE_BPP:-32})"
+if [ "${RB_RUNTIME_PROFILE:-rx3}" = "rx" ]; then
+	if [ ! -f "$RBP_INSTALLED" ]; then
+		bad "the player is missing: $RBP_INSTALLED"
+		fix "# place the RX rbp binary at $RBP_INSTALLED (PROFILE=rx build output)"
 	else
-		# Of the remaining builds, the superseded and stock ones are wrong in a way
-		# that reads as "the unit is dead", so they are named rather than counted.
+		_rbp_sum=$(_md5 "$RBP_INSTALLED")
 		if [ "$_rbp_sum" = "?" ]; then
-			warn "player present but unverifiable: $(wc -c < "$RBP_INSTALLED") bytes, no md5sum here"
-			note "expected $_rbp_want; compare by hand before trusting this unit."
+			warn "RX player present but unverifiable: $(wc -c < "$RBP_INSTALLED") bytes, no md5sum here"
 		else
-			bad "the installed player is NOT our build: $_rbp_sum"
+			ok "RX player present: $_rbp_sum (guarded hash checks are done by scripts/patch-rx-rbp.py)"
 		fi
-		note "$RBP_INSTALLED -- $(_rbp_build "$_rbp_sum")"
-		note "ours is $_rbp_want (tools/patch-rbp/PATCHES.md pins all five)"
-		fix "# rebuild into the chroot, or scp a known-good player over $RBP_INSTALLED"
+	fi
+else
+	if [ ! -f "$RBP_INSTALLED" ]; then
+		bad "the player is missing: $RBP_INSTALLED"
+		fix "# scripts/build-chroot.sh stages it; or tools/patch-rbp/rbp_patch.py <stock> -o rbp-audio && scripts/patch-rbp-nopc.py rbp-audio -o rbp-nopc"
+	else
+		_rbp_sum=$(_md5 "$RBP_INSTALLED")
+		_rbp_want=$(_rbp_final_for_depth)
+		if [ "$_rbp_sum" = "$_rbp_want" ]; then
+			ok "player presents as our final build for RB_FB_LIE_BPP=${RB_FB_LIE_BPP:-32}: $_rbp_sum"
+		elif [ "$_rbp_sum" = "$RB_RBP_FINAL16" ] || [ "$_rbp_sum" = "$RB_RBP_FINAL32" ]; then
+			# Ours, complete, and at the other depth. This is not a corrupt player, so
+			# it must not be reported as one -- but it is also not runnable: the pair
+			# has to agree, and start-rb.sh refuses this one on purpose.
+			_rbp_d=$(_rbp_depth "$RBP_INSTALLED")
+			bad "the installed player is our final build, but at ${_rbp_d} bpp, and"
+			bad "RB_FB_LIE_BPP=${RB_FB_LIE_BPP:-32} -- start-rb.sh will refuse to launch it"
+			note "$RBP_INSTALLED is $_rbp_sum ($(_rbp_build "$_rbp_sum"))"
+			note "the layer pixel format and the shim's FBIOGET_VSCREENINFO lie must agree;"
+			note "DirectFB's layer plugin refuses a mismatched pair and rbp dies before the"
+			note "panel opens, with nothing in rbp.log that names the depth."
+			fix "# move ONE half of the pair:"
+			fix "#   echo RB_FB_LIE_BPP=$_rbp_d >> $RB_DEPLOY_ROOT/rb.local.conf   # match the lie to the player"
+			fix "#   or install a ${RB_FB_LIE_BPP:-32}-bpp player here (on the host:"
+			fix "#       python3 scripts/patch-rbp-depth.py <player> --bpp ${RB_FB_LIE_BPP:-32})"
+		else
+			# Of the remaining builds, the superseded and stock ones are wrong in a way
+			# that reads as "the unit is dead", so they are named rather than counted.
+			if [ "$_rbp_sum" = "?" ]; then
+				warn "player present but unverifiable: $(wc -c < "$RBP_INSTALLED") bytes, no md5sum here"
+				note "expected $_rbp_want; compare by hand before trusting this unit."
+			else
+				bad "the installed player is NOT our build: $_rbp_sum"
+			fi
+			note "$RBP_INSTALLED -- $(_rbp_build "$_rbp_sum")"
+			note "ours is $_rbp_want (tools/patch-rbp/PATCHES.md pins all five)"
+			fix "# rebuild into the chroot, or scp a known-good player over $RBP_INSTALLED"
+		fi
 	fi
 fi
 

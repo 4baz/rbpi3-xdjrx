@@ -92,7 +92,7 @@ static int dump_started;
  * turn `MIDI_MAP=kbd` into a typo warning and a silent fall back to the FLX4,
  * which is the opposite of what an operator writing it wants. */
 static const struct ctrl_map *const midi_maps[] = {
-     &map_flx4, &map_jp21, &map_kbd, &map_none,
+     &map_flx4, &map_ddj400, &map_ergo, &map_jp21, &map_kbd, &map_none,
 };
 static const struct ctrl_map *const evdev_maps[] = {
      &map_kbd, &map_none,
@@ -368,16 +368,7 @@ static void *midi_thread(void *arg)
                                   (void *)replay) == 0)
           pthread_detach(tid);
 
-     for (int i = 0; i < 300; i++) {
-          if (get_key_manager())
-               break;
-          usleep(100000);
-     }
-     if (!get_key_manager()) {
-          klog("knobshim2: KeyManager never became ready\n");
-          return NULL;
-     }
-     klog("knobshim2: KeyManager ready, opening sequencer...\n");
+     klog("knobshim2: opening sequencer without startup KeyManager wait\n");
 
      /* Whatever each surface needs rbp to be told, told before the first event:
       * anything sent earlier is dropped by rbp's own mixer init. MIDI side first,

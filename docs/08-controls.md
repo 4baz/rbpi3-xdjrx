@@ -88,7 +88,7 @@ ask rbp for is exactly the set of named functions in `rbp_bridge.h` —
 address itself. Semantics that are peculiar to one surface (shift, FX select,
 whether a CC is a switch) stay local to that map.
 
-`RB_MIDI_MAP` selects one of `flx4`, `jp21`, `kbd`, `none`, and `RB_EVDEV_MAP`
+`RB_MIDI_MAP` selects one of `flx4`, `ddj400`, `ergo`, `jp21`, `kbd`, `none`, and `RB_EVDEV_MAP`
 selects one of `kbd`, `none`; they are two independent choices, one per event
 source, because a controller and a keyboard are different devices. Both have a
 default in `rb.conf` and in the source (`flx4` and `kbd`), so a unit with a

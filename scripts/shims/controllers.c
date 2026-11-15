@@ -28,6 +28,12 @@ static const unsigned char sysex_flx4_keepalive[] = {
      0xF0, 0x00, 0x40, 0x05, 0x00, 0x00, 0x04, 0x05, 0x00, 0x50, 0x02, 0xF7
 };
 
+/* DDJ-400 startup status request, as the sibling bridge sends once at connect.
+ * Unlike FLX4's keepalive this is one-shot and carries no period. */
+static const unsigned char sysex_ddj400_init[] = {
+     0xF0, 0x00, 0x40, 0x05, 0x00, 0x00, 0x02, 0x06, 0x00, 0x03, 0x01, 0xF7
+};
+
 /* ---- the JP21's absolute-value query ----
  *
  * This port's OWN bytes, moved here verbatim from midi_io.c's
@@ -42,13 +48,12 @@ static const unsigned char sysex_jp21_abs[] = {
 /*
  * THE TABLE.
  *
- * Two rows, and the difference between them is the whole point: the FLX4 is the
- * surface this port has measured end to end, so every token is filled in; the
- * JP21 is the surface this port was built from but no longer runs, so its USB id,
- * its card id and its port-name hint are NULL -- UNKNOWN, and printed as unknown
- * -- rather than guessed. A guessed token is exactly the drift this table exists
- * to remove, and a wrong card id would send audioshim looking for a device that
- * cannot exist.
+ * The surface rows intentionally carry different confidence levels: the FLX4 is
+ * measured end-to-end here, DDJ-400 adds the known USB/card/hint tokens plus its
+ * startup SysEx, ERGO is experimental (hint-driven, unknown USB/card id), and
+ * JP21 keeps unknown USB/card/hint fields NULL rather than guessed. A guessed
+ * token is exactly the drift this table exists to remove, and a wrong card id
+ * would send audioshim looking for a device that cannot exist.
  *
  * Rows are ordered newest-target-first. Nothing indexes this array, so the order
  * is for the reader (and for the CLI's `names`).
@@ -63,6 +68,28 @@ static const struct controller table[] = {
           "flx4",
           NULL, 0,                                  /* no SysEx of its own */
           sysex_flx4_keepalive, sizeof sysex_flx4_keepalive, 200,
+          0, NULL,                                  /* a surface, not a mixer */
+     },
+     {
+          "ddj400",
+          "DDJ-400",
+          "2b73:0017",
+          "DDJ-400",
+          "DDJ400",
+          "ddj400",
+          sysex_ddj400_init, sizeof sysex_ddj400_init,
+          NULL, 0, 0,                               /* wants no keepalive */
+          0, NULL,                                  /* a surface, not a mixer */
+     },
+     {
+          "ergo",
+          "DDJ-ERGO",
+          NULL,                                     /* USB id not recorded here */
+          "ERGO",
+          NULL,                                     /* card id not recorded here */
+          "ergo",
+          NULL, 0,
+          NULL, 0, 0,                               /* wants no keepalive */
           0, NULL,                                  /* a surface, not a mixer */
      },
      {

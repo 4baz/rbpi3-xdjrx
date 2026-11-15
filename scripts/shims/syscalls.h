@@ -36,6 +36,11 @@ static inline int real_open(const char *p, int flags, mode_t mode)
     return (int)syscall(SYS_openat, AT_FDCWD, p, flags, mode);
 }
 
+static inline int real_openat(int dirfd, const char *p, int flags, mode_t mode)
+{
+    return (int)syscall(SYS_openat, dirfd, p, flags, mode);
+}
+
 static inline ssize_t real_read(int fd, void *buf, size_t n)
 {
     return syscall(SYS_read, fd, buf, n);
