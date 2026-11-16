@@ -87,6 +87,7 @@
  *     make test
  */
 #define _GNU_SOURCE
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -136,6 +137,26 @@ static int checks, failures;
  * ========================================================================== */
 
 int verbose = 0;          /* every klog() in the map is gated on this */
+static int test_rx_profile;
+int rbp_on_rx_profile(void) { return test_rx_profile; }
+
+static int rx_loop_active[2];
+static int rx_loop_starts[2], rx_loop_resizes[2], rx_loop_direction[2];
+static unsigned short rx_loop_beats[2], rx_loop_divisor[2];
+int rx_loop_is_active(int deck) { return rx_loop_active[deck]; }
+int rx_loop_resize(int deck, int increase)
+{
+     rx_loop_resizes[deck]++;
+     rx_loop_direction[deck] = increase;
+     return 1;
+}
+int rx_loop_start(int deck, unsigned short beats, unsigned short divisor)
+{
+     rx_loop_starts[deck]++;
+     rx_loop_beats[deck] = beats;
+     rx_loop_divisor[deck] = divisor;
+     return 1;
+}
 
 int g_fader[3] = { 1023, 1023, 1023 };
 int g_fader_seen[3];
@@ -1393,6 +1414,226 @@ int main(void)
      CHECK(n == fixture_events,
            "the paced replay dispatched %d events, expected %d",
            n, fixture_events);
+
+     ctrl_bindings_reset();
+     setenv("MIDI_MAP", "ergo", 1);
+     test_rx_profile = 1;
+     map_ergo.build();
+     for (int channel = 0; channel < 2; channel++) {
+          struct snd_seq_event ev = {0};
+          ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
+          ev.data.control.channel = channel;
+          ev.data.control.param = 19;
+          ev.data.control.value = 1;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = channel;
+          ev.data.note.note = 20;
+          ev.data.note.velocity = 127;
+          map_ergo.event(&ev);
+          map_ergo.event(&ev);
+          CHECK(rx_loop_starts[channel] == 1 && rx_loop_beats[channel] == 2 &&
+                rx_loop_divisor[channel] == 1,
+                "ERGO deck %d knob must start one two-beat loop", channel);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          rx_loop_active[channel] = 1;
+          ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
+          ev.data.control.channel = channel;
+          ev.data.control.param = 19;
+          ev.data.control.value = 127;
+          map_ergo.event(&ev);
+          CHECK(rx_loop_resizes[channel] == 1 && rx_loop_direction[channel] == 1,
+                "ERGO deck %d clockwise must double active loop", channel);
+          ev.data.control.value = 1;
+          map_ergo.event(&ev);
+          CHECK(rx_loop_resizes[channel] == 2 && rx_loop_direction[channel] == 0,
+                "ERGO deck %d counterclockwise must halve active loop", channel);
+          sent_n = 0;
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = channel;
+          ev.data.note.note = 20;
+          ev.data.note.velocity = 127;
+          map_ergo.event(&ev);
+          map_ergo.event(&ev);
+          CHECK(sent_n == 2 && sent[0].key == 0x4110 &&
+                sent[0].op == OP_PRESS && sent[0].ch == channel + 1 &&
+                sent[1].key == 0x4110 && sent[1].op == OP_RELEASE,
+                "ERGO deck %d knob must exit active loop once", channel);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          rx_loop_active[channel] = 0;
+     }
+     {
+          struct snd_seq_event ev = {0};
+          sent_n = 0;
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 6;
+          ev.data.note.note = 101;
+          ev.data.note.velocity = 127;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 2, "ERGO Browse produced %d events", sent_n);
+          if (sent_n == 2) {
+               CHECK(sent[0].key == 0x0208 && sent[0].op == OP_PRESS &&
+                     sent[0].ch == CH_GLOBAL,
+                     "ERGO button did not press RX Browse");
+               CHECK(sent[1].key == 0x0208 && sent[1].op == OP_RELEASE &&
+                     sent[1].ch == CH_GLOBAL,
+                     "ERGO button did not release RX Browse");
+          }
+     }
+     for (int channel = 0; channel <= 3; channel++) {
+          struct snd_seq_event ev = {0};
+          sent_n = 0;
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = channel;
+          ev.data.note.velocity = 127;
+          ev.data.note.note = 114;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 0, "ERGO deck selector %d sent an RX key", channel);
+          if (channel > 1)
+               continue;
+          sent_n = 0;
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.note = 11;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 2, "ERGO deck %d play produced %d events", channel, sent_n);
+          if (sent_n == 2) {
+               CHECK(sent[0].key == K_PLAY && sent[0].op == OP_PRESS &&
+                     sent[0].ch == channel + 1,
+                     "ERGO deck %d did not press PLAY on the right deck", channel);
+               CHECK(sent[1].key == K_PLAY && sent[1].op == OP_RELEASE &&
+                     sent[1].ch == channel + 1,
+                     "ERGO deck %d did not release PLAY on the right deck", channel);
+          }
+     }
+     {
+          static const struct { int note, key; } buttons[] = {
+               {12, 0x4102}, {88, 0x410b}, {16, 0x410d}, {17, 0x410f},
+               {26, 0x4109}, {27, 0x4108}, {92, 0x4112},
+               {54, 0x430e}
+          };
+          for (int channel = 0; channel < 2; channel++) {
+               for (size_t j = 0; j < sizeof(buttons) / sizeof(buttons[0]); j++) {
+                    struct snd_seq_event ev = {0};
+                    sent_n = 0;
+                    ev.type = SNDRV_SEQ_EVENT_NOTEON;
+                    ev.data.note.channel = channel;
+                    ev.data.note.note = buttons[j].note;
+                    ev.data.note.velocity = 127;
+                    map_ergo.event(&ev);
+                    ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+                    map_ergo.event(&ev);
+                    CHECK(sent_n == 2, "ERGO ch%d note%d produced %d events",
+                          channel, buttons[j].note, sent_n);
+                    if (sent_n == 2) {
+                         CHECK(sent[0].key == buttons[j].key &&
+                               sent[0].op == OP_PRESS && sent[0].ch == channel + 1,
+                               "ERGO ch%d note%d press mismatch", channel, buttons[j].note);
+                         CHECK(sent[1].key == buttons[j].key &&
+                               sent[1].op == OP_RELEASE && sent[1].ch == channel + 1,
+                               "ERGO ch%d note%d release mismatch", channel, buttons[j].note);
+                    }
+               }
+          }
+     }
+     for (int channel = 0; channel < 2; channel++) {
+          static const struct { int msb, lsb, neg, positive; float norm; } positions[] = {
+               {0, 0, 0, 1023, 1.0f},
+               {64, 0, 512, 511, -1.0f / 509.0f},
+               {127, 127, 1023, 0, -1.0f}
+          };
+          struct snd_seq_event ev = {0};
+          ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
+          ev.data.control.channel = channel;
+          for (size_t j = 0; j < sizeof positions / sizeof positions[0]; j++) {
+               sent_n = 0;
+               ev.data.control.param = 0;
+               ev.data.control.value = positions[j].msb;
+               map_ergo.event(&ev);
+               ev.data.control.param = 32;
+               ev.data.control.value = positions[j].lsb;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 1, "ERGO deck %d tempo sent %d events", channel, sent_n);
+               if (sent_n == 1) {
+                    CHECK(sent[0].key == 0x410a && sent[0].op == 4 &&
+                          sent[0].ch == channel + 1 &&
+                          sent[0].param == positions[j].neg &&
+                          sent[0].lval == positions[j].positive &&
+                          fabsf(sent[0].fval - positions[j].norm) < 0.00001f,
+                          "ERGO deck %d tempo position %zu mismatch", channel, j);
+               }
+          }
+          for (int cc = 33; cc <= 35; cc++) {
+               sent_n = 0;
+               ev.data.control.param = cc;
+               ev.data.control.value = 65;
+               map_ergo.event(&ev);
+               map_ergo.event(&ev);
+               CHECK(sent_n >= 1, "ERGO deck %d jog CC%d produced no event", channel, cc);
+               if (sent_n >= 1) {
+                    const struct sent *s = &sent[sent_n - 1];
+                    CHECK(s->key == 0x4306 && s->op == 3 &&
+                          s->ch == channel + 1 && s->param == 1 && s->fval > 0,
+                          "ERGO deck %d jog CC%d mismatch", channel, cc);
+               }
+          }
+          sent_n = 0;
+          ev.data.control.param = 33;
+          ev.data.control.value = 63;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 1 && sent[0].key == 0x4306 && sent[0].param == -1 &&
+                sent[0].fval < 0, "ERGO deck %d reverse jog mismatch", channel);
+     }
+     sent_n = 0;
+     usleep(200000);
+     map_ergo.tick();
+     CHECK(sent_n == 2, "ERGO jog idle produced %d events", sent_n);
+     for (int i = 0; i < sent_n; i++)
+          CHECK(sent[i].key == 0x4306 && sent[i].op == 3 &&
+                sent[i].ch == i + 1 && sent[i].param == 0 && sent[i].fval == 0,
+                "ERGO deck %d jog idle mismatch", i);
+     {
+          static const struct { int cc, key, ch; } controls[] = {
+               {3, 0x5007, 1}, {4, 0x5007, 2},
+               {7, 0x5008, 1}, {8, 0x5008, 2},
+               {11, 0x5009, 1}, {12, 0x5009, 2},
+               {15, 0x500a, 1}, {16, 0x500a, 2},
+               {19, 0x5011, 1}, {21, 0x5011, 2}, {31, 0x600f, 0}
+          };
+          for (size_t j = 0; j < sizeof(controls) / sizeof(controls[0]); j++) {
+               struct snd_seq_event ev = {0};
+               ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
+               ev.data.control.channel = 6;
+               ev.data.control.param = controls[j].cc;
+               ev.data.control.value = 127;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               ev.data.control.param += 32;
+               map_ergo.event(&ev);
+               CHECK(sent_n >= 1, "ERGO mixer CC%d produced no output", controls[j].cc);
+               if (sent_n >= 1) {
+                    struct sent *s = &sent[sent_n - 1];
+                    CHECK(s->key == controls[j].key && s->op == 4 &&
+                          s->ch == controls[j].ch && s->param == 1023 &&
+                          s->fval == 1.0f,
+                          "ERGO mixer CC%d did not reach RX maximum", controls[j].cc);
+               }
+               ev.data.control.param = controls[j].cc;
+               ev.data.control.value = 0;
+               map_ergo.event(&ev);
+               ev.data.control.param += 32;
+               map_ergo.event(&ev);
+               CHECK(sent[sent_n - 1].param == 0,
+                     "ERGO mixer CC%d did not reach RX minimum", controls[j].cc);
+          }
+     }
 
      printf("test_flx4: %d checks, %d failures\n", checks, failures);
      return failures == 0 ? 0 : 1;

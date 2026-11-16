@@ -39,6 +39,7 @@
 #include "keylog_state.h"
 #include "evdev_io.h"
 #include "ctrl_map.h"
+#include "rbp_abi.h"      /* PANEL_PEER_GLOBAL_RX: the RX panel bootstrap unstick */
 #include "controllers.h"   /* the surface table: the default map, the keepalive */
 #include "usb_label.h"     /* a stick's own name, for rbp's device row */
 #include "syscalls.h"      /* real_open/real_read: rbp interposes open itself */
@@ -642,6 +643,23 @@ static void *usb_auto_thread(void *arg)
           if (!get_key_manager())
                continue;
 
+          /* Every field this thread pokes (detect words, name fields, the
+           * media/mode/dev/refresh globals) is an RX3 binary address. On the
+           * native RX player the same addresses land in read-only .text and
+           * the first write is a SIGSEGV (measured: pid crash at
+           * addr=0x0325688c, the USB1 name field, the moment the key path
+           * reported ready). RX media registration is a separate job keyed off
+           * the RX's own device records; until then this thread only watches. */
+          if (rbp_on_rx_profile()) {
+               static int rx_usb_noted;
+               if (!rx_usb_noted) {
+                    rx_usb_noted = 1;
+                    klog("knobshim2: usb_auto: RX profile -- RX3 media fields "
+                         "skipped (RX device records not wired yet)\n");
+               }
+               continue;
+          }
+
           int mounted  = access("/media/usb1/sda1/PIONEER/rekordbox/export.pdb", F_OK) == 0;
           int mounted2 = access("/media/usb2/sda1/PIONEER/rekordbox/export.pdb", F_OK) == 0;
 
@@ -731,6 +749,319 @@ static void *usb_auto_thread(void *arg)
      return NULL;
 }
 
+/* --- /tmp/rb_key poke -------------------------------------------------------
+ *
+ * A debug hatch for probing keycodes on a live unit: write one line
+ * "key op ch [param] [f]" (strtoul base 0, so 0x20a reads as itself), the
+ * thread sends it down the key path and UNLINKS the file, so every write is
+ * one event -- a repeated identical press is a fresh write. This is how the
+ * RX nav keycode table was measured (the RX3 table in rbp_abi.h only partly
+ * matches the RX player). The key dump records these as src=poke. */
+static void *keypoke_thread(void *arg)
+{
+     char buf[128];
+     (void)arg;
+     if (!is_rbp_process())
+          return NULL;
+     for (;;) {
+          int fd;
+          ssize_t n;
+          char *p, *end;
+          long key, op, ch, param;
+          float f;
+
+          usleep(200000);
+          fd = real_open("/tmp/rb_key", O_RDONLY, 0);
+          if (fd < 0)
+               continue;
+          n = real_read(fd, buf, sizeof(buf) - 1);
+          real_close(fd);
+          unlink("/tmp/rb_key");
+          if (n <= 0)
+               continue;
+          buf[n] = '\0';
+
+          p = buf;
+          key = strtoul(p, &end, 0);
+          if (end == p)
+               continue;
+          op = strtoul(p = end, &end, 0);
+          if (end == p)
+               continue;
+          ch = strtol(p = end, &end, 0);
+          if (end == p)
+               continue;
+          param = strtol(p = end, &end, 0);
+          f = 0.0f;
+          if (end != p)
+               f = (float)strtod(end, NULL);
+
+          klog("knobshim2: poke key=0x%lx op=%ld ch=%ld param=%ld f=%g\n",
+               key, op, ch, param, (double)f);
+          keylog_from("poke");
+          send_rx_key_fl((int)key, (int)op, (int)ch, param, f, 0);
+     }
+}
+
+/* --- xdj-panel debug bridge -------------------------------------------------
+ *
+ * Upstream xdj-rx-tools ships tools/xdj-panel/debug/inj.py, which drives an
+ * emulator by writing two control files:
+ *   - /tmp/subucom_ctrl : lines like "b 5d 10" (button bit pulse/hold)
+ *   - /tmp/mainkey      : one GPIO id per file (158/159/160/161)
+ *
+ * The Pi runtime here has no consumer for those files; this thread provides one
+ * by translating the known controls into rbp key events so the same workflow can
+ * be used on-device during bring-up.
+ */
+struct panel_debug_bit {
+     unsigned off;
+     unsigned mask;
+     int key_rx3;
+     int key_rx;
+     int ch;
+     const char *name;
+};
+
+static const struct panel_debug_bit panel_debug_bits[] = {
+     { 0x5d, 0x10, K_SELECTOR, 0x420c, CH_GLOBAL, "browse-push" },
+     { 0x5d, 0x40, K_LOAD,     K_LOAD, 1,         "load1" },
+     { 0x5d, 0x80, K_LOAD,     K_LOAD, 2,         "load2" },
+     { 0x5e, 0x01, K_BACK,     K_BACK, CH_GLOBAL, "back" },
+     { 0x5f, 0x01, K_MENU,     0x020a, CH_GLOBAL, "menu" },
+     { 0x13, 0x40, K_PLAY,     K_PLAY, 1,         "play1" },
+     { 0x23, 0x40, K_PLAY,     K_PLAY, 2,         "play2" },
+};
+
+struct panel_debug_mainkey {
+     int gpio;
+     int key_rx3;
+     int key_rx;
+     int ch;
+     const char *name;
+};
+
+static const struct panel_debug_mainkey panel_debug_mainkeys[] = {
+     /* xdj-panel's source labels; RX mappings are best-effort until pinned. */
+     { 160, K_USB1,      0x0409, CH_GLOBAL, "usb1" },
+     { 159, K_REKORDBOX, 0x0401, CH_GLOBAL, "rekordbox" },
+     { 158, K_SOURCE,    0x0201, CH_GLOBAL, "usb2" },
+     { 161, K_LINK,      0x0208, CH_GLOBAL, "midi" },
+};
+
+static int panel_dbg_key(int key_rx3, int key_rx)
+{
+     return rbp_on_rx_profile() ? key_rx : key_rx3;
+}
+
+static int panel_dbg_read_file(const char *path, char *buf, size_t cap)
+{
+     int fd = real_open(path, O_RDONLY, 0);
+     ssize_t n;
+     if (fd < 0)
+          return -1;
+     n = real_read(fd, buf, cap - 1);
+     real_close(fd);
+     if (n <= 0)
+          return -1;
+     buf[n] = '\0';
+     return (int)n;
+}
+
+static void panel_dbg_parse_ctrl(const char *buf, uint8_t *active, size_t nbits)
+{
+     const char *p = buf;
+     memset(active, 0, nbits);
+     while (*p) {
+          char *end;
+          unsigned off, mask;
+
+          while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+               p++;
+          if (*p == '\0')
+               break;
+          if (*p != 'b' && *p != 'B') {
+               while (*p && *p != '\n')
+                    p++;
+               continue;
+          }
+          p++;
+          off = (unsigned)strtoul(p, &end, 16);
+          if (end == p) {
+               while (*p && *p != '\n')
+                    p++;
+               continue;
+          }
+          p = end;
+          mask = (unsigned)strtoul(p, &end, 16);
+          if (end == p) {
+               while (*p && *p != '\n')
+                    p++;
+               continue;
+          }
+          p = end;
+
+          for (size_t i = 0; i < nbits; i++)
+               if (panel_debug_bits[i].off == off &&
+                   panel_debug_bits[i].mask == mask)
+                    active[i] = 1;
+
+          while (*p && *p != '\n')
+               p++;
+     }
+}
+
+static int panel_dbg_parse_mainkey(const char *buf)
+{
+     char *end;
+     long gpio = strtol(buf, &end, 10);
+     if (end == buf)
+          return -1;
+     return (int)gpio;
+}
+
+static void *panel_debug_thread(void *arg)
+{
+     uint8_t prev_bits[sizeof(panel_debug_bits)/sizeof(panel_debug_bits[0])] = {0};
+     uint8_t cur_bits[sizeof(panel_debug_bits)/sizeof(panel_debug_bits[0])] = {0};
+     int prev_gpio = -1;
+     (void)arg;
+     if (!is_rbp_process())
+          return NULL;
+
+     for (;;) {
+          char ctrl_buf[1024];
+          char mk_buf[64];
+          int ctrl_n;
+          int mk_n;
+          int cur_gpio = -1;
+          size_t nbits = sizeof(panel_debug_bits)/sizeof(panel_debug_bits[0]);
+
+          usleep(200000);
+
+          ctrl_n = rbp_on_rx_profile() ? -1 :
+               panel_dbg_read_file("/tmp/subucom_ctrl", ctrl_buf, sizeof ctrl_buf);
+          if (ctrl_n > 0)
+               panel_dbg_parse_ctrl(ctrl_buf, cur_bits, nbits);
+          else
+               memset(cur_bits, 0, nbits);
+
+          for (size_t i = 0; i < nbits; i++) {
+               int key = panel_dbg_key(panel_debug_bits[i].key_rx3,
+                                       panel_debug_bits[i].key_rx);
+               int ch = panel_debug_bits[i].ch;
+               if (cur_bits[i] && !prev_bits[i]) {
+                    klog("knobshim2: paneldbg %s down -> key=0x%x ch=%d\n",
+                         panel_debug_bits[i].name, key, ch);
+                    keylog_from("paneldbg");
+                    send_rx_key(key, OP_PRESS, ch, 0);
+               } else if (!cur_bits[i] && prev_bits[i]) {
+                    klog("knobshim2: paneldbg %s up -> key=0x%x ch=%d\n",
+                         panel_debug_bits[i].name, key, ch);
+                    keylog_from("paneldbg");
+                    send_rx_key(key, OP_RELEASE, ch, 0);
+               }
+               prev_bits[i] = cur_bits[i];
+          }
+
+          mk_n = panel_dbg_read_file("/tmp/mainkey", mk_buf, sizeof mk_buf);
+          if (mk_n > 0)
+               cur_gpio = panel_dbg_parse_mainkey(mk_buf);
+
+          if (cur_gpio != prev_gpio) {
+               if (prev_gpio >= 0) {
+                    for (size_t i = 0; i < sizeof(panel_debug_mainkeys)/sizeof(panel_debug_mainkeys[0]); i++) {
+                         if (panel_debug_mainkeys[i].gpio != prev_gpio)
+                              continue;
+                         keylog_from("paneldbg");
+                         send_rx_key(panel_dbg_key(panel_debug_mainkeys[i].key_rx3,
+                                                   panel_debug_mainkeys[i].key_rx),
+                                     OP_RELEASE, panel_debug_mainkeys[i].ch, 0);
+                         break;
+                    }
+               }
+               if (cur_gpio >= 0) {
+                    for (size_t i = 0; i < sizeof(panel_debug_mainkeys)/sizeof(panel_debug_mainkeys[0]); i++) {
+                         if (panel_debug_mainkeys[i].gpio != cur_gpio)
+                              continue;
+                         klog("knobshim2: paneldbg mainkey gpio=%d (%s)\n",
+                              cur_gpio, panel_debug_mainkeys[i].name);
+                         keylog_from("paneldbg");
+                         send_rx_key(panel_dbg_key(panel_debug_mainkeys[i].key_rx3,
+                                                   panel_debug_mainkeys[i].key_rx),
+                                     OP_PRESS, panel_debug_mainkeys[i].ch, 0);
+                         break;
+                    }
+               }
+               prev_gpio = cur_gpio;
+          }
+     }
+}
+
+/* --- the RX panel bootstrap unstick ----------------------------------------
+ *
+ * On the native RX player the manager init (0x245098) builds two
+ * UsbStorageManagers whose GpioManager ctors read the USB-detect lines off
+ * the stub /dev/gpiodrv; a LOW read fires a callback that sends to the panel
+ * peer, and PanelComPeer's send spins while (*(peer+0x88) == 0) waiting for
+ * the panel poll thread -- which FUN_002481ec starts only AFTER init returns.
+ * Circular deadlock: init waits for the poll thread, the poll thread waits
+ * for init. rbp's UI still comes up far enough to draw, the KeyManager exists
+ * (it is built before the stall), but every sendKey -- ours and rbp's own --
+ * parks in a 1 ms nanosleep loop forever.
+ *
+ * xdj-rx-tools' rbp-and-panel-protocol.md documents the mechanism and the
+ * proof: writing peer+0x88 = 1 (peer = *(uint32_t *)0x0124087c) unstuck the
+ * process instantly (sub-ucom fd opened, UiMain thread started). This thread
+ * does that write from inside, once, as soon as the peer exists. On hardware
+ * where the lines idle HIGH the flag is set by the poll thread at the same
+ * byte, so setting it early changes nothing.
+ */
+static void *panel_unstick_thread(void *arg)
+{
+     (void)arg;
+     if (!is_rbp_process() || !rbp_on_rx_profile())
+          return NULL;
+     /* OFF unless PANEL_UNSTICK=1: with fbshim answering gpiodrv reads HIGH the
+      * init deadlock does not form, and on a healthy-but-slow boot this thread
+      * would set the peer's flag before the poll-thread start sequence finished
+      * with it, which crashed rbp at 0x24b700 (null deref in the callback
+      * continuation). Keep it available for bring-up experiments only. */
+     if (!env_on("PANEL_UNSTICK", 0))
+          return NULL;
+     /* fix-dev.sh's 0xff-filled gpiodrv stub makes the USB-detect lines read
+      * HIGH, so the deadlock should never form. This is the fallback for the
+      * day that stops holding: only write when the peer has existed with the
+      * flag CLEAR for a sustained 10 s -- a healthy boot sets the flag from
+      * the poll thread within seconds of the peer appearing, and releasing a
+      * sender before init finished building the peer's surroundings is how
+      * the first version of this thread caused a null deref at 0x24b700. */
+     int stall_ms = 0;
+     for (int i = 0; i < 1200; i++) {   /* give up after ~2 min */
+          uint32_t peer = *(volatile uint32_t *)PANEL_PEER_GLOBAL_RX;
+          if (!peer) {
+               stall_ms = 0;
+               usleep(100000);
+               continue;
+          }
+          volatile uint8_t *rdy =
+               (volatile uint8_t *)(uintptr_t)(peer + PANEL_PEER_RDY_OFF);
+          if (*rdy != 0)
+               return NULL;             /* poll thread came up on its own */
+          stall_ms += 100;
+          if (stall_ms >= 10000) {
+               *rdy = 1;
+               klog("knobshim2: RX panel bootstrap: peer 0x%08lx was stuck "
+                    "10 s with the poll flag clear; released the init deadlock "
+                    "(see xdj-rx-tools rbp-and-panel-protocol.md)\n",
+                    (unsigned long)peer);
+               return NULL;
+          }
+          usleep(100000);
+     }
+     return NULL;
+}
+
 __attribute__((constructor))
 static void knobshim2_init(void)
 {
@@ -748,6 +1079,12 @@ static void knobshim2_init(void)
      if (led_sweep && pthread_create(&tid, NULL, led_sweep_thread, NULL) == 0)
           pthread_detach(tid);
      if (pthread_create(&tid, NULL, usb_auto_thread, NULL) == 0)
+          pthread_detach(tid);
+     if (pthread_create(&tid, NULL, panel_unstick_thread, NULL) == 0)
+          pthread_detach(tid);
+     if (pthread_create(&tid, NULL, keypoke_thread, NULL) == 0)
+          pthread_detach(tid);
+     if (pthread_create(&tid, NULL, panel_debug_thread, NULL) == 0)
           pthread_detach(tid);
      /* The load-by-id watcher. It is inert until /tmp/rb_load exists, so it costs
       * an unopened file every 200 ms and nothing else until it is asked. */

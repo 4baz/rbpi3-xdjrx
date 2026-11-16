@@ -376,7 +376,7 @@ master_policy.o: master_policy.c master_policy.h
 #   fx_zone.o     the BEAT FX panel's two controls: the CH SELECT cycle and the
 #                  effect picker rbp's own effect-name cell raises -- one column,
 #                  fourteen rows, in the order the FLX4's FX SELECT button steps
-FBSHIM_OBJS := fb_shim.o tscfake.o pointsrc.o point_xform.o touch_zone.o \
+FBSHIM_OBJS := fb_shim.o rx_panel.o shimutil.o tscfake.o pointsrc.o point_xform.o touch_zone.o \
                fb_cursor.o cursor_paint.o menu_zone.o menu_paint.o menu_draw.o \
                drmband.o side_zone.o side_paint.o util_zone.o \
                wave_zone.o fx_zone.o fx_paint.o \

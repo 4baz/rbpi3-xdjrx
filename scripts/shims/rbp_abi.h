@@ -17,6 +17,38 @@
 #define KEY_MANAGER_OFF   100
 #define SENDKEY_VTABLE_WORD 2
 
+/* Native XDJ-RX key path (RB_RUNTIME_PROFILE=rx). Derived statically from the
+ * RX player binary (sha256 4f62aa71ef8c7246536e87950939cc081b1850b22502a3780851c20c35b18dd7,
+ * the same copy xdj-rx-tools analyzed):
+ *  - the manager singleton accessor at 0x20dc6c keeps the instance pointer in
+ *    a .bss global at UI_OBJ_MGR_GLOBAL_RX (0x0123e16c);
+ *  - its init at 0x245098 news ui::KeyManager (ctor 0x2750c0) and stores it at
+ *    manager+0x44 (KEY_MANAGER_OFF_RX);
+ *  - a KeyManager instance's word 0 is the vtable KM_VTABLE_RX (0x426cd0),
+ *    whose function slot SENDKEY_VTABLE_WORD is IKeyManager::sendKey at
+ *    ADDR_SENDKEY_RX (0x2a47c0) -- taking (this, keycode, op, ch, param, f, l)
+ *    with the same stack-spill convention as the RX3's sendKey. */
+#define UI_OBJ_MGR_GLOBAL_RX 0x0123e16cUL
+#define KEY_MANAGER_OFF_RX   0x44
+#define KM_VTABLE_RX         0x00426cd0UL
+#define ADDR_SENDKEY_RX      0x002a47c0UL
+
+/* XDJ-RX DjEngineIF wrappers: deck is zero-based. */
+#define RX_LOOP_ENGINE_GLOBAL 0x01079cb0UL
+#define RX_LOOP_IS_ACTIVE     0x00053ebcUL
+#define RX_LOOP_RESIZE        0x000540e8UL
+#define RX_LOOP_START_AUTO    0x00054994UL
+
+/* RX panel bootstrap (rbp-and-panel-protocol.md "SOLVED: it was a boot
+ * deadlock"): the manager init's USB-detect GPIO callbacks send to the panel
+ * peer when the stub /dev/gpiodrv reads a line LOW, and PanelComPeer's send
+ * spins while(*(peer+0x88)==0) waiting for the poll thread -- which only
+ * starts AFTER init returns. peer lives in this .bss global; setting its
+ * +0x88 byte once breaks the circle exactly as the documented /proc/mem poke
+ * does. */
+#define PANEL_PEER_GLOBAL_RX 0x0124087cUL
+#define PANEL_PEER_RDY_OFF   0x88
+
 #define OP_PRESS      0
 /* The op BETWEEN a press and a release, and not a release itself. rbp's onKey
  * reads `keyinput->byte[11] & 0xf` and derives two bools from it (the call sites

@@ -9,12 +9,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 #include "syscalls.h"
 
 #include "rbp_abi.h"
 #include "rbp_key.h"
 #include "keylog_state.h"
+#include "shimutil.h"
 
 int is_rbp_process(void)
 {
@@ -36,6 +38,24 @@ int is_rbp_process(void)
 }
 static int is_rbp_checked = -1;
 
+/* -1 until first use, then 1 on the native XDJ-RX player (RUNTIME_PROFILE=rx,
+ * exported from RB_RUNTIME_PROFILE by start-rb.sh) and 0 on the RX3 player.
+ * Gating BEFORE any address is read is what makes this safe: the RX globals
+ * below can be unmapped in an RX3 process and vice versa. */
+static int rx_profile = -1;
+
+int rbp_on_rx_profile(void)
+{
+     if (rx_profile < 0)
+          rx_profile = strcmp(env_text("RUNTIME_PROFILE", "rx3"), "rx") == 0;
+     return rx_profile;
+}
+
+static int on_rx_profile(void)
+{
+     return rbp_on_rx_profile();
+}
+
 void *get_key_manager(void)
 {
      void **p;
@@ -44,6 +64,33 @@ void *get_key_manager(void)
           is_rbp_checked = is_rbp_process();
      if (!is_rbp_checked)
           return NULL;
+     if (on_rx_profile()) {
+          static int rx_km_logged;
+          void *km;
+          mgr = *(void **)UI_OBJ_MGR_GLOBAL_RX;
+          if (!mgr)
+               return NULL;
+          km = *(void **)((char *)mgr + KEY_MANAGER_OFF_RX);
+          if (!km)
+               return NULL;
+          /* The manager being up does not prove the KeyManager slot has been
+           * filled by a real KeyManager: accept the chain only when word 0 of
+           * the object is ui::KeyManager's vtable exactly. A wrong chain fails
+           * closed here instead of calling through a garbage vtable. */
+          if (*(uint32_t *)km != KM_VTABLE_RX) {
+               if (!rx_km_logged) {
+                    rx_km_logged = 1;
+                    klog("knobshim2: RX key manager slot %p holds non-KeyManager (vt=0x%08lx)\n",
+                         km, (unsigned long)*(uint32_t *)km);
+               }
+               return NULL;
+          }
+          if (!rx_km_logged) {
+               rx_km_logged = 1;
+               klog("knobshim2: RX key manager ready: mgr=%p km=%p vtable ok\n", mgr, km);
+          }
+          return km;
+     }
      p = (void **)UI_OBJ_MGR_GLOBAL;
      if (!p)
           return NULL;
@@ -75,7 +122,6 @@ typedef void (*sendkey_fn)(void *km, int keycode, int op, int ch,
  * always in the same library, so a per-library TLS variable is exactly the right
  * scope -- and no cross-library TLS interposition has to work for it. */
 static __thread const char *keylog_tag;
-
 void keylog_from(const char *src)
 {
      keylog_tag = src;
@@ -90,6 +136,12 @@ void send_rx_key_fl(int keycode, int op, int ch, long param,
      void **vt = *(void ***)km;
      sendkey_fn fn = (sendkey_fn)vt[SENDKEY_VTABLE_WORD];
      if (!fn)
+          return;
+     /* On the RX player the vtable was already verified at lookup; the slot
+      * must resolve to IKeyManager::sendKey exactly. Anything else means the
+      * chain matched by coincidence, and a call through it would be into
+      * arbitrary code. */
+     if (on_rx_profile() && (uintptr_t)fn != ADDR_SENDKEY_RX)
           return;
      /* Recorded BEFORE the call, and only when the call is really made. Every
       * line in a key dump is therefore a keycode rbp was handed -- a send from

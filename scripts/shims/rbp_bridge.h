@@ -59,6 +59,11 @@ void *plinn(int deck);
 int aloop_is_looping(int deck);
 void aloop_apply(int deck, void *p, int idx);
 
+/* RX loop operations: deck 0/1; -1 means the native engine is unavailable. */
+int rx_loop_is_active(int deck);
+int rx_loop_resize(int deck, int increase);
+int rx_loop_start(int deck, unsigned short beats, unsigned short divisor);
+
 /* Delete HOT CUE `pad` (1..8) on `deck` (0..1) -- the one gesture on this
  * surface rbp has no keycode for.  It calls rbp's own
  * ui::Player::onHotCueDeleteEvent(pad) directly (rbp_abi.h's ADDR_HOTCUE_DELETE),
@@ -91,4 +96,3 @@ extern volatile unsigned int g_meter_bits[3];
 void install_meter_hook(void);
 
 #endif /* RBPI4B_RBP_BRIDGE_H */
-

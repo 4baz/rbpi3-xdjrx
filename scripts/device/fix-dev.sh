@@ -126,6 +126,19 @@ for d in printkdrv0 tsc2007_2-0048 gpiodrv; do
     chmod 666 "$RB_CHROOT/dev/$d" 2>/dev/null
 done
 
+# On the native RX profile (rbx-run chroot) the gpiodrv stub is READ, not just
+# ioctl'd: rbp's GpioManager does lseek(fd, gpio_id) + read(fd, 1) for the
+# level. An empty file reads EOF==0 == LOW, and the USB-detect lines (gpio 126
+# deck 1, gpio 204 deck 2) idling LOW is the XDJ-RX boot deadlock: the
+# UsbStorageManager callback sends to the panel peer before the panel poll
+# thread exists and spins forever (xdj-rx-tools rbp-and-panel-protocol.md).
+# Real hardware idles these lines HIGH, so the RX stub reads back 0xff bytes.
+# 4 KiB covers every gpio id rbp lseeks to.
+case "${RB_RUNTIME_PROFILE:-rx3}" in
+  rx) dd if=/dev/zero bs=512 count=8 2>/dev/null | tr '\000' '\377' \
+        > "$RB_CHROOT/dev/gpiodrv" ;;
+esac
+
 # paudiog0 must NOT exist: its presence makes JUCE take the USB-gadget-audio
 # path and issue gadget ioctls this kernel has no idea about.
 rm -f "$RB_CHROOT/dev/paudiog0"

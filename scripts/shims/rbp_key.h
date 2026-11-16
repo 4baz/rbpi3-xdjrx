@@ -27,6 +27,12 @@
  * thread and by install_meter_hook(). */
 int is_rbp_process(void);
 
+/* 1 on the native XDJ-RX player (RUNTIME_PROFILE=rx), 0 on the RX3 player.
+ * Every RX3-specific absolute address (media fields, mixer-route words, meter
+ * hook site) must be gated on this before it is touched: on the RX binary the
+ * RX3's data addresses can land in read-only text and a write is a SIGSEGV. */
+int rbp_on_rx_profile(void);
+
 /* rbp's KeyManager singleton, NULL until rbp has constructed it -- and NULL in
  * any process that is not rbp. */
 void *get_key_manager(void);

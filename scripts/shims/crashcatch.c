@@ -176,6 +176,50 @@ static void fatal(int sig, siginfo_t *si, void *uc) {
     b[i++] = '\n';
     emit(b, i);
 
+    /* Mini backtrace: scan the live stack for words that point into rbp's
+     * .text (0x0000eda0-0x0035af40 for the RX player; the RX3's spans it too)
+     * and log them in order. Each is a candidate return address -- the call
+     * site is the `bl` 4 bytes before it. No unwinder, no symbols, and the
+     * scan is bounded and read-only so it cannot re-fault on a valid stack. */
+    {
+        unsigned sp = (unsigned)u->uc_mcontext.arm_sp & ~3U;
+        unsigned fp = (unsigned)u->uc_mcontext.arm_fp;
+        int n = 0;
+        char sb[448];
+        int si = 0;
+        si = put(sb, si, "CRASH v"); si = putdec(sb, si, CRASH_WITNESS_V);
+        si = put(sb, si, " pid=");   si = putdec(sb, si, (int)getpid());
+        si = put(sb, si, " stack:");
+        /* Scan up to 2 KiB of live stack for words pointing into rbp's
+         * .text: candidate return addresses (call site = the bl 4 before). */
+        for (unsigned a = sp; a < sp + 2048 && si < 280; a += 4) {
+            unsigned w = *(volatile unsigned *)(unsigned long)a;
+            if (w >= 0x0000eda0UL && w < 0x0035af40UL) {
+                si = put(sb, si, " "); si = puthex(sb, si, w);
+                n++;
+            }
+        }
+        /* And the fp chain (APCS: [fp]=old fp, [fp-4]... fp+4 is saved lr on
+         * this build's frame layout) -- a few hops is plenty. */
+        si = put(sb, si, " fpchain:");
+        for (int hop = 0; hop < 6 && si < 380; hop++) {
+            unsigned ret, next;
+            if (fp < 0x1000 || (fp & 3))
+                break;
+            next = *(volatile unsigned *)(unsigned long)fp;
+            ret  = *(volatile unsigned *)(unsigned long)(fp + 4);
+            if (ret >= 0x0000eda0UL && ret < 0x0035af40UL) {
+                si = put(sb, si, " "); si = puthex(sb, si, ret);
+            }
+            if (next <= fp)
+                break;
+            fp = next;
+        }
+        sb[si++] = '\n';
+        emit(sb, si);
+        (void)n;
+    }
+
     die(1);
 }
 

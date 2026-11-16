@@ -321,6 +321,8 @@ fi
 # environment -- and an empty or unset one is not a problem: env_str() falls back to
 # the /run/rblive4 default, so the panel writes where the viewer reads either way.
 SHIM_VARS="
+RUNTIME_PROFILE
+PANEL_UNSTICK
 DFB_PRESENT DFB_ROTATE PAN_PACER_MS FB_DEV FB_LIE_BPP
 DFB_PRESENT_AUTO DFB_PRESENT_FIT DFB_PRESENT_SKIP DFB_PRESENT_PX_BUDGET
 POINT_KIND POINT_DEV POINT_DEBUG POINT_MIN_DWELL_MS POINT_MOUSE_SPEED
@@ -518,7 +520,14 @@ cleanup() {
 trap 'cleanup; exit 0' TERM INT
 
 # Sleep while rbp lives, so the launching shell does not redraw over the UI.
-while kill -0 "$RBP" 2>/dev/null; do
+#
+# Do not trust the launch-time PID forever: if rbp dies and that numeric PID is
+# reused by another process, `kill -0 $RBP` stays true and this shell never
+# exits, so systemd cannot restart the unit. Track rbp by command-line match each
+# pass instead.
+while :; do
+    RBP_NOW=$(pids_matching "$RB_PLAYER" | head -1)
+    [ -n "$RBP_NOW" ] || break
     sleep 2
 done
 

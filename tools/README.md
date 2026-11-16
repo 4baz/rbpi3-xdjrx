@@ -5,6 +5,7 @@ Two kinds of tool live here:
 | Tool | Runs on | Language | Purpose |
 |---|---|---|---|
 | [`patch-rbp/`](patch-rbp/) | workstation | Python | apply the interoperability patches to a stock `rbp` |
+| [`xdj-panel/`](xdj-panel/) | workstation / Pi | Python + HTML | upstream XDJ-RX panel/debug tooling (`server.py`, web panel, and `debug/inj.py` style probes). On the Pi runtime the shim now bridges `/tmp/subucom_ctrl` + `/tmp/mainkey` into rbp key events for bring-up. |
 | [`build-directfb/`](build-directfb/) | workstation | C / patch | patched DirectFB 1.4.16 (core + fbdev + modules) |
 | [`build-toolchain/`](build-toolchain/) | workstation | Docker | the soft-float armel cross build environment the shims are built in |
 | [`fit-crosscheck.sh`](fit-crosscheck.sh) | workstation | shell + C | prove the driver's copy and the shim's copy of the fit rule still agree |

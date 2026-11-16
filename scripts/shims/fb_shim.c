@@ -56,6 +56,8 @@
 #include "syscalls.h"
 #include "envutil.h"
 #include "pointsrc.h"          /* pointsrc_log, for the vsync counter below */
+#include "rx_panel.h"
+#include "rbp_key.h"
 
 #include <stdarg.h>
 #include <errno.h>
@@ -307,6 +309,9 @@ int open64(const char *pathname, int flags, ...)
     }
     if (path && strcmp(path, TSC_DEVICE_PATH) == 0)
         return tscfake_open();
+    if (path && strcmp(path, "/dev/subucom_spi1.0") == 0 &&
+        rbp_on_rx_profile() && is_rbp_process())
+        return rx_panel_open();
     int fd = real_open(path, flags | O_LARGEFILE, mode);
     if (fd >= 0 && fd < MAX_GPIO_FDS && path && strstr(path, "gpiodrv"))
         is_gpio_fd[fd] = 1;
@@ -364,7 +369,21 @@ int openat64(int dirfd, const char *pathname, int flags, ...)
 ssize_t read(int fd, void *buf, size_t count)
 {
     if (fd >= 0 && fd < MAX_GPIO_FDS && is_gpio_fd[fd] && count >= 1) {
-        memset(buf, 0, 1);
+        /* GPIO input levels. The RX3 build ships LOW (0): its GpioManager
+         * clients only configure lines and never read a level that matters.
+         * The native RX player DOES read them: the USB-detect lines (gpio
+         * 126/204) feed UsbStorageManager callbacks, and the direct panel keys
+         * (USB1/USB2/rekordbox/MIDI on 158-161) are read the same way. On the
+         * real unit every input idles HIGH (external pull-up; xdj-rx-tools
+         * qemu patch 04/09). Reading LOW here made both USB-detect lines
+         * "device present" at boot -- the send-before-poll-thread init
+         * deadlock AND the permanent "USB Error. Remove the device." modal.
+         * HIGH = no key, no USB stick, no deadlock. (env_str, not the
+         * rbp_key.c helper: shimutil.o is not linked into fbshim.so.) */
+        static int rx_high = -1;
+        if (rx_high < 0)
+            rx_high = strcmp(env_str("RUNTIME_PROFILE", "rx3"), "rx") == 0;
+        memset(buf, rx_high ? 1 : 0, 1);
         return 1;
     }
     if (tscfake_is_fd(fd))

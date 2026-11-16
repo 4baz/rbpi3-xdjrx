@@ -59,6 +59,43 @@ int cc_to_10bit(int v)
      return (v << 3) | (v >> 4);
 }
 
+static int rx_loop_available(int deck)
+{
+     if (deck < 0 || deck > 1 || !rbp_on_rx_profile() || !is_rbp_process())
+          return 0;
+     if (*(const uint32_t *)RX_LOOP_IS_ACTIVE != 0xe92d40f8 ||
+         *(const uint32_t *)RX_LOOP_RESIZE != 0xe92d41f0 ||
+         *(const uint32_t *)RX_LOOP_START_AUTO != 0xe92d47f0 ||
+         !*(void **)RX_LOOP_ENGINE_GLOBAL) {
+          klog("knobshim2: RX loop engine unavailable or unexpected binary\n");
+          return 0;
+     }
+     return 1;
+}
+
+int rx_loop_is_active(int deck)
+{
+     if (!rx_loop_available(deck))
+          return -1;
+     return ((int (*)(void *, int))RX_LOOP_IS_ACTIVE)(NULL, deck) != 0;
+}
+
+int rx_loop_resize(int deck, int increase)
+{
+     if (!rx_loop_available(deck))
+          return -1;
+     return ((int (*)(void *, int, int))RX_LOOP_RESIZE)(NULL, deck, increase != 0);
+}
+
+int rx_loop_start(int deck, unsigned short beats, unsigned short divisor)
+{
+     struct { unsigned short beats, divisor; } size = { beats, divisor };
+     if (!beats || !divisor || !rx_loop_available(deck))
+          return -1;
+     return ((int (*)(void *, int, const void *, int, int))RX_LOOP_START_AUTO)
+          (NULL, deck, &size, 0, 0);
+}
+
 int rbp_beatfx_type(void)
 {
      /* A plain function in rbp's text (map_jp21.c has called it this way since
