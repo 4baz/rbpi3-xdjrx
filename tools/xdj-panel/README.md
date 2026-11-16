@@ -46,6 +46,9 @@ Notes:
   Other controls, including source buttons, require further verification.
 - With the DDJ-ERGO RX map, FUNCTION/REC opens Browse. Deck C/D switch the
   controller's own deck layer; use A/B for RX decks.
+- The ERGO MASTER knob controls RX master volume through the RX mixer. This is
+  separate from the FLX4 hardware-output volume mapping and has been confirmed
+  on the Pi.
 - The ERGO tempo faders and jogs use RX-specific events; their physical direction,
   jog sensitivity and scratching still need confirmation on the Pi. `TEMPO_REV`
   and `JOG_REV` reverse their respective directions if needed.

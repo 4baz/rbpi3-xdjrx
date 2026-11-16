@@ -757,6 +757,7 @@ static int rx_ergo_mixer_cc(int ch, int cc, int val)
      static struct mixer_cc {
           int cc, key, channel, msb, lsb, last;
      } controls[] = {
+          { 0, 0x4405, 0, -1, 0, -1 },
           { 3, 0x5007, 1, -1, 0, -1 }, { 4, 0x5007, 2, -1, 0, -1 },
           { 7, 0x5008, 1, -1, 0, -1 }, { 8, 0x5008, 2, -1, 0, -1 },
           {11, 0x5009, 1, -1, 0, -1 }, {12, 0x5009, 2, -1, 0, -1 },

@@ -1601,6 +1601,7 @@ int main(void)
                 "ERGO deck %d jog idle mismatch", i);
      {
           static const struct { int cc, key, ch; } controls[] = {
+               {0, 0x4405, 0},
                {3, 0x5007, 1}, {4, 0x5007, 2},
                {7, 0x5008, 1}, {8, 0x5008, 2},
                {11, 0x5009, 1}, {12, 0x5009, 2},
@@ -1633,6 +1634,27 @@ int main(void)
                CHECK(sent[sent_n - 1].param == 0,
                      "ERGO mixer CC%d did not reach RX minimum", controls[j].cc);
           }
+     }
+     {
+          struct snd_seq_event ev = {0};
+          ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
+          ev.data.control.channel = 6;
+          ev.data.control.param = 0;
+          ev.data.control.value = 64;
+          sent_n = 0;
+          g_master_gain = 1.0f;
+          g_mirror_gain = 1.0f;
+          map_ergo.event(&ev);
+          ev.data.control.param = 32;
+          ev.data.control.value = 127;
+          map_ergo.event(&ev);
+          CHECK(sent_n >= 1 && sent[sent_n - 1].key == 0x4405 &&
+                sent[sent_n - 1].op == 4 && sent[sent_n - 1].ch == 0 &&
+                sent[sent_n - 1].param == 519 &&
+                fabsf(sent[sent_n - 1].fval - 519.0f / 1023.0f) < 0.00001f,
+                "ERGO master CC0/32 midpoint did not reach RX master volume");
+          CHECK(g_master_gain == 1.0f && g_mirror_gain == 1.0f,
+                "ERGO master must not apply a second shim gain");
      }
 
      printf("test_flx4: %d checks, %d failures\n", checks, failures);
