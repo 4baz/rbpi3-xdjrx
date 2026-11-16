@@ -315,7 +315,7 @@ struct tick {
     int present, x, y, down;
 };
 
-#define TICKS_MAX 8
+#define TICKS_MAX 201
 static struct tick script[TICKS_MAX];
 static int script_n;
 static int script_i;
@@ -485,6 +485,7 @@ static int thread_gone;
 static long sleep_cap = 100000;      /* backstop: a scenario bug must not hang */
 static long sleeps;
 static int exit_script, exit_cap;
+static const char *ready_on_first_sleep;
 
 int __wrap_usleep(useconds_t usec)
 {
@@ -494,6 +495,11 @@ int __wrap_usleep(useconds_t usec)
         exit_cap = !tick_done;
         thread_gone = 1;
         pthread_exit(NULL);
+    }
+    if (sleeps == 1 && ready_on_first_sleep) {
+        FILE *f = fopen(ready_on_first_sleep, "w");
+        if (f)
+            fclose(f);
     }
     return 0;
 }
@@ -677,6 +683,55 @@ static void scenario_stretch(void)
     CHECK(x0 == 1279 && y0 == 719,
           "the tip is at %d,%d, expected the page corner 1279,719", x0, y0);
     CHECK(outside_picture(1280, 720, 0, 0), "the arrow left the page");
+}
+
+static void scenario_rx_plane_stretch(void)
+{
+    static const struct tick ticks[] = { { 1, 1279, 799, 0 } };
+    int x0, y0, x1, y1;
+    char ready[] = "/tmp/rx-cursor-test.XXXXXX";
+    int fd = mkstemp(ready);
+
+    CHECK(fd >= 0, "could not create readiness marker");
+    if (fd < 0)
+        return;
+    close(fd);
+    setenv("RX_DISPLAY_STRETCH_READY", ready, 1);
+    setup_fb(1280, 800, 16, 2560);
+    arm(ticks, 1);
+    CHECK(run_thread(), "the thread never finished");
+    CHECK(changed_box(&x0, &y0, &x1, &y1) > 0, "nothing was drawn");
+    CHECK(x0 == 799 && y0 == 479 && x1 == 799 && y1 == 479,
+          "cursor box %d,%d..%d,%d, expected RX source corner 799,479",
+          x0, y0, x1, y1);
+    CHECK(outside_picture(800, 480, 0, 0), "the arrow left the RX source");
+    unlink(ready);
+}
+
+static void scenario_rx_plane_stretch_late(void)
+{
+    struct tick ticks[TICKS_MAX];
+    int x0, y0, x1, y1;
+    char ready[] = "/tmp/rx-cursor-test.XXXXXX";
+    int fd = mkstemp(ready);
+
+    CHECK(fd >= 0, "could not create readiness marker");
+    if (fd < 0)
+        return;
+    close(fd);
+    unlink(ready);
+    setenv("RX_DISPLAY_STRETCH_READY", ready, 1);
+    ready_on_first_sleep = ready;
+    for (int i = 0; i < TICKS_MAX; i++)
+        ticks[i] = (struct tick){ 1, 640, 400, 0 };
+    setup_fb(1280, 800, 16, 2560);
+    arm(ticks, TICKS_MAX);
+    CHECK(run_thread(), "the thread never finished");
+    CHECK(changed_box(&x0, &y0, &x1, &y1) > 0, "nothing was drawn");
+    CHECK(x0 == 400 && y0 == 240 && x1 <= 411 && y1 <= 258,
+          "cursor box %d,%d..%d,%d did not move to RX source or restore the old arrow",
+          x0, y0, x1, y1);
+    unlink(ready);
 }
 
 /* 4. A padded stride. line_length 2112 with 16 bpp is a pitch of 1056 px against
@@ -904,6 +959,8 @@ static const struct scenario scenarios[] = {
     { "fit, right edge",         scenario_fit_right_edge   },
     { "fit, bottom-right corner", scenario_fit_corner      },
     { "stretch",                 scenario_stretch          },
+    { "RX plane stretch",        scenario_rx_plane_stretch },
+    { "RX stretch after startup", scenario_rx_plane_stretch_late },
     { "padded stride",           scenario_padded_stride    },
     { "fb absent, then appears", scenario_absent_fb        },
     { "retry log gating",        scenario_retry_gate       },

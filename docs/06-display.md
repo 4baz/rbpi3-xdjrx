@@ -4,6 +4,30 @@ The rekordbox UI renders full-screen on an HDMI monitor. `rbp` draws a logical
 **1280×800 RGB565** surface through DirectFB, and the patched fbdev module
 presents it to whatever `/dev/fb0` actually is.
 
+## Native XDJ-RX stretch
+
+The native RX player instead draws its interface in the top-left **800×480**
+of the framebuffer. Its RX-compatible DirectFB module does not implement the
+RX3 driver's `DFB_PRESENT` scaling options, and scaling the entire 1280×800
+surface would not enlarge that smaller picture anyway.
+
+On the tested Pi's 1280×800 RGB565 `/dev/fb0`, set
+`RB_RX_DISPLAY_STRETCH=1` in `/opt/rblive4/rb.local.conf` and restart
+`rblive4`. The launcher keeps a helper running that asks the DRM primary plane
+to stretch the 800×480 source across the existing 1280×800 output. Neither the
+HDMI mode nor the framebuffer geometry reported to the player is changed. The
+helper restores the plane on shutdown; if it cannot safely identify the
+expected framebuffer and sole active primary plane, it logs an error and leaves
+the display unscaled. RX3 is unaffected. Set the option to `0` and restart to
+disable the stretch.
+
+This is limited to the tested framebuffer geometry and holds DRM master while
+active, so other programs cannot independently control DRM planes. The cursor
+is placed within the enlarged RX picture, but RX3-specific touch regions and
+overlay planes have not been adapted or verified for the native RX interface.
+The framebuffer itself still contains the original 800×480 image, so framebuffer
+captures do not show the hardware stretch.
+
 ## The stack
 
 ```

@@ -428,6 +428,30 @@ if [ "${RB_PREWARM:-1}" = 1 ]; then
     rb_bootmsg "pre-warmed rbp files (${_pw_s}s)"
 fi
 
+# Install cleanup before starting the display helper or player so a stop during
+# player initialization also restores the plane.
+RX_STRETCH_PID=""
+RX_STRETCH_READY=""
+cleanup() {
+    sh "$HERE/usb-watch.sh" stop 2>/dev/null
+    sh "$HERE/display-watch.sh" stop 2>/dev/null
+    for p in $(pids_matching "$RB_PLAYER") $(pids_matching edb_streamd); do
+        kill -9 "$p" 2>/dev/null
+    done
+    if [ -n "$RX_STRETCH_PID" ]; then
+        kill "$RX_STRETCH_PID" 2>/dev/null || true
+        wait "$RX_STRETCH_PID" || echo "start-rb: WARNING: RX display helper exited with an error" >&2
+        RX_STRETCH_PID=""
+    fi
+}
+trap 'cleanup; exit 0' TERM INT
+
+RX_DISPLAY_STRETCH_READY=""
+if [ "${RB_RUNTIME_PROFILE:-rx3}" = rx ] && [ "${RB_RX_DISPLAY_STRETCH:-0}" = 1 ]; then
+    RX_DISPLAY_STRETCH_READY="/run/rblive4/rx-display-stretch.$$.ready"
+fi
+export RX_DISPLAY_STRETCH_READY
+
 # --- 9. start rbp -----------------------------------------------------------
 #
 # The display watcher's baseline is recorded as the LAST thing before the launch,
@@ -473,7 +497,34 @@ if [ -z "$RBP" ]; then
     echo "start-rb: rbp is not running. Last lines of $RBP_LOG:" >&2
     tail -20 "$RBP_LOG" >&2 2>/dev/null
     rb_bootmsg "rbp is not running -- see $RBP_LOG"
+    cleanup
     exit 1
+fi
+
+# Start only after rbp's initialization; the helper holds DRM master.
+if [ -n "$RX_DISPLAY_STRETCH_READY" ]; then
+    RX_STRETCH_READY="$RX_DISPLAY_STRETCH_READY"
+    if [ "${RB_FB_DEV:-/dev/fb0}" != /dev/fb0 ]; then
+        echo "start-rb: WARNING: RX display stretch requires RB_FB_DEV=/dev/fb0" >&2
+    elif mkdir -p /run/rblive4 && [ -f "$HERE/rx-display-stretch.py" ]; then
+        python3 "$HERE/rx-display-stretch.py" run "$RX_STRETCH_READY" &
+        RX_STRETCH_PID=$!
+        for i in $(seq 1 50); do
+            [ -f "$RX_STRETCH_READY" ] && break
+            kill -0 "$RX_STRETCH_PID" 2>/dev/null || break
+            sleep 0.1
+        done
+        if [ -f "$RX_STRETCH_READY" ] && kill -0 "$RX_STRETCH_PID" 2>/dev/null; then
+            RX_DISPLAY_STRETCH_ACTIVE=1
+        else
+            echo "start-rb: WARNING: RX display stretch failed; using the unscaled framebuffer" >&2
+            kill "$RX_STRETCH_PID" 2>/dev/null || true
+            wait "$RX_STRETCH_PID" 2>/dev/null || true
+            RX_STRETCH_PID=""
+        fi
+    else
+        echo "start-rb: WARNING: RX display stretch helper or run directory is unavailable" >&2
+    fi
 fi
 
 # --- 10. the two watchers, then wait ----------------------------------------
@@ -493,32 +544,6 @@ sh "$HERE/display-watch.sh" start 2>/dev/null
 echo "start-rb: display-watch started"
 rb_bootmsg "display-watch started"
 
-# --- 11. cleanup, on every exit path ----------------------------------------
-#
-# Defined before the wait loop and installed as a signal handler, because
-# `systemctl stop`/`restart` sends SIGTERM to THIS shell: without the trap the
-# shell dies where it stands and everything it started -- rbp, edb_streamd, the
-# watcher, and the media mounts -- is left running. The unit would then be
-# "stopped" with a live player on screen, and the next start would fight it.
-# This also makes docs/11's existing claim ("Ctrl-C the launcher") true, which it
-# has not been: a Ctrl-C killed the shell and orphaned rbp the same way.
-cleanup() {
-    sh "$HERE/usb-watch.sh" stop 2>/dev/null
-    # Same trap, same reason as the USB watcher above, and it is what makes
-    # "no watcher is left behind" true — which is the thing S10.6 checks. When
-    # the exit IS the restart this watcher asked for, the request has already
-    # reached systemd, so stopping it here cancels nothing.
-    sh "$HERE/display-watch.sh" stop 2>/dev/null
-    for p in $(pids_matching "$RB_PLAYER") $(pids_matching edb_streamd); do
-        kill -9 "$p" 2>/dev/null
-    done
-}
-# `exit 0` and not the signal's default status: a stop is a successful stop, and
-# a non-zero exit here would make systemd record a failure for a deliberate
-# `systemctl stop`. Under Restart=always the exit status does not decide whether
-# we relaunch, but it does decide what `systemctl status` reports afterwards.
-trap 'cleanup; exit 0' TERM INT
-
 # Sleep while rbp lives, so the launching shell does not redraw over the UI.
 #
 # Do not trust the launch-time PID forever: if rbp dies and that numeric PID is
@@ -528,6 +553,10 @@ trap 'cleanup; exit 0' TERM INT
 while :; do
     RBP_NOW=$(pids_matching "$RB_PLAYER" | head -1)
     [ -n "$RBP_NOW" ] || break
+    if [ -n "$RX_STRETCH_PID" ] && ! kill -0 "$RX_STRETCH_PID" 2>/dev/null; then
+        echo "start-rb: ERROR: RX display helper exited; restarting the player" >&2
+        break
+    fi
     sleep 2
 done
 

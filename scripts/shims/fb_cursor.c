@@ -84,6 +84,7 @@ struct cursor_state {
      * exactly what it drew before it knew about other panels. Computed once, by
      * map_fb(), out of point_fit(). */
     int dw, dh, bx, by;
+    int normal_dw, normal_dh, normal_bx, normal_by, rx_stretched;
     unsigned int saved[CURSOR_W * CURSOR_H];
     int drawn, x, y, pressed;
 };
@@ -186,6 +187,16 @@ static int map_fb(struct cursor_state *s, const char *dev, int loud)
     stretch = strcmp(env_str("DFB_PRESENT_FIT", "fit"), "stretch") == 0;
     point_fit(POINT_LOGICAL_W, POINT_LOGICAL_H, s->fb_w, s->fb_h, stretch,
               &s->dw, &s->dh, &s->bx, &s->by);
+    s->normal_dw = s->dw; s->normal_dh = s->dh;
+    s->normal_bx = s->bx; s->normal_by = s->by;
+    if (env_str("RX_DISPLAY_STRETCH_READY", "")[0] &&
+        access(env_str("RX_DISPLAY_STRETCH_READY", ""), F_OK) == 0 &&
+        s->fb_w == 1280 && s->fb_h == 800) {
+        s->rx_stretched = 1;
+        s->dw = 800;
+        s->dh = 480;
+        s->bx = s->by = 0;
+    }
 
     if (loud)
         pointsrc_log("cursor: %dx%d %d bpp pitch %d at %p; picture %dx%d at %d,%d%s; "
@@ -218,8 +229,9 @@ static int scale_to(int v, int logical, int real)
 static void *cursor_thread(void *arg)
 {
     const char *dev;
+    const char *rx_ready;
     long period_us;
-    int attempts;
+    int attempts, rx_check = 0;
     (void)arg;
 
     /* Seconds are too coarse and integers too blunt for this one: the useful
@@ -232,6 +244,7 @@ static void *cursor_thread(void *arg)
         period_us = CURSOR_US_MIN;
 
     dev = env_str("FB_DEV", FB_DEV_DEFAULT);
+    rx_ready = env_str("RX_DISPLAY_STRETCH_READY", "");
 
     /* Retry rather than exit, which is pointsrc.c's rule and for the same reason:
      * a monitor that appears long after boot, or a framebuffer the kernel tears
@@ -251,6 +264,25 @@ static void *cursor_thread(void *arg)
     }
 
     for (;;) {
+        if (rx_ready[0] && ++rx_check >= 200) {
+            int enabled = g.fb_w == 1280 && g.fb_h == 800 &&
+                          access(rx_ready, F_OK) == 0;
+            rx_check = 0;
+            if (enabled != g.rx_stretched) {
+                unsigned char *old = (unsigned char *)g.pix +
+                    (size_t)g.by * (size_t)g.pitch * (size_t)(g.bpp / 8) +
+                    (size_t)g.bx * (size_t)(g.bpp / 8);
+                if (g.drawn)
+                    cursor_restore(old, g.pitch, g.dw, g.dh, g.bpp,
+                                   g.x, g.y, g.pressed, g.saved);
+                g.drawn = 0;
+                g.rx_stretched = enabled;
+                g.dw = enabled ? 800 : g.normal_dw;
+                g.dh = enabled ? 480 : g.normal_dh;
+                g.bx = enabled ? 0 : g.normal_bx;
+                g.by = enabled ? 0 : g.normal_by;
+            }
+        }
         /* The picture's top-left inside the page. Nothing else is needed to keep
          * the arrow inside the picture: cursor_paint() and cursor_restore() clamp
          * their x and y to the width and height they are handed, so giving them
