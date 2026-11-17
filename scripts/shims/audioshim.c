@@ -1007,6 +1007,9 @@ static unsigned char g_mirror_hold[MIRROR_PAD_MAX * MIRROR_FRAME_MAX];
 static unsigned int g_out_channels;   /* negotiated; 0 until set_channels() */
 static int g_pairs_resolved;
 static unsigned long g_write_count;
+static unsigned long g_master_xruns;
+static unsigned long g_master_write_errors;
+static unsigned long g_master_short_writes;
 static int g_big_block_logged;
 static int g_pack_failed_logged;
 
@@ -2847,6 +2850,14 @@ int snd_pcm_hw_params_set_periods_near(snd_pcm_t *pcm, snd_pcm_hw_params_t *para
 
     init_real_alsa();
     alog("audioshim: set_periods_near req=%u\n", val ? *val : 0);
+    /* Optional deeper ring for the master device: rbp's write size stays at one
+     * period, so only the slack against scheduling jitter grows. */
+    if (val && is_rbp_master(pcm)) {
+        const char *e = getenv("AUDIO_PERIODS");
+        int n = e ? atoi(e) : 0;
+        if (n >= 2 && n <= 16)
+            *val = (unsigned int)n;
+    }
     if (is_forwardable(pcm) && real_snd_pcm_hw_params_set_periods_near) {
         err = real_snd_pcm_hw_params_set_periods_near(pcm, params, val, dir);
         alog("audioshim: real set_periods_near res=%d periods=%u\n", err, val ? *val : 0);
@@ -4094,6 +4105,13 @@ static snd_pcm_sframes_t flush_master(const int32_t *src, snd_pcm_uframes_t size
         snd_pcm_sframes_t written =
             real_snd_pcm_writei(g_real_playback, out, size);
 
+        if (written == -EPIPE)
+            g_master_xruns++;
+        else if (written < 0 && written != -EAGAIN)
+            g_master_write_errors++;
+        else if (written >= 0 && (snd_pcm_uframes_t)written < size)
+            g_master_short_writes++;
+
         if (written != -ENODEV && written < 0) {
             /* The usual cause is an underrun or an XRUN after a stall; preparing
              * and rewriting once recovers it, and rbp never learns.
@@ -4155,9 +4173,11 @@ static snd_pcm_sframes_t flush_master(const int32_t *src, snd_pcm_uframes_t size
         }
         if ((g_write_count % 500) == 1)
             alog("audioshim: writei #%lu frames=%lu bytes=%u written=%ld "
-                 "peak_m=%d mainvol=%.3f prepares=%lu\n",
+                 "peak_m=%d mainvol=%.3f prepares=%lu xruns=%lu "
+                 "write_errors=%lu short_writes=%lu\n",
                  g_write_count, (unsigned long)size, out_bytes, (long)written,
-                 s_peak_master, (double)master_gain, g_prepare_count);
+                 s_peak_master, (double)master_gain, g_prepare_count,
+                 g_master_xruns, g_master_write_errors, g_master_short_writes);
     } else if (out) {
         /* No card: either one was never opened (a unit booted with the controller
          * unplugged) or it was lost above. Both recover the same way, and this is

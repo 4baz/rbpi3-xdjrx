@@ -9,6 +9,7 @@
 #include "rbp_bridge.h"
 #include "rbp_key.h"
 #include "rbp_vu.h"
+#include "rx_panel_led.h"
 #include "shimutil.h"
 
 
@@ -58,9 +59,9 @@ enum {
 
 static int loop_size[2] = { 7, 7 };
 static int loop_down[2];
-static int cue_led_last[2];
-static unsigned cue_led_ticks;
-static int cue_led_disabled;
+static int panel_led_last[4];
+static unsigned panel_led_ticks;
+static int panel_led_disabled;
 static const struct { unsigned short beats, divisor; } loop_sizes[] = {
      {1, 32}, {1, 16}, {1, 8}, {1, 4}, {1, 2}, {1, 1},
      {2, 1}, {4, 1}, {8, 1}, {16, 1}, {32, 1}
@@ -70,9 +71,10 @@ static void ergo_reset(void)
 {
      loop_size[0] = loop_size[1] = 7;
      loop_down[0] = loop_down[1] = 0;
-     cue_led_last[0] = cue_led_last[1] = -1;
-     cue_led_ticks = 0;
-     cue_led_disabled = env_on("LED_DISABLE", 0);
+     for (int i = 0; i < 4; i++)
+          panel_led_last[i] = -1;
+     panel_led_ticks = 0;
+     panel_led_disabled = env_on("LED_DISABLE", 0);
 }
 
 void ergo_add_deck(int deck)
@@ -251,17 +253,19 @@ static void ergo_dispatch(const struct snd_seq_event *ev)
 static void ergo_tick(void)
 {
      pioneer_tick();
-     if (!rbp_on_rx_profile() || cue_led_disabled)
+     if (!rbp_on_rx_profile() || panel_led_disabled)
           return;
-     int cue = rx_panel_cue_leds();
-     if (cue < 0)
+     int leds = rx_panel_leds();
+     if (leds < 0)
           return;
-     int force = (++cue_led_ticks % 5) == 0;
-     for (int deck = 0; deck < 2; deck++) {
-          int on = (cue >> deck) & 1;
-          if ((force || cue_led_last[deck] != on) &&
-              midi_note(ERGO_MIX, ERGO_CUE_1 + deck, on ? 127 : 0))
-               cue_led_last[deck] = on;
+     int force = (++panel_led_ticks % 5) == 0;
+     for (int i = 0; i < 4; i++) {
+          int on = (leds >> i) & 1;
+          int channel = i < 2 ? ERGO_MIX : i - 2;
+          int note = i < 2 ? ERGO_CUE_1 + i : 88;
+          if ((force || panel_led_last[i] != on) &&
+              midi_note(channel, note, on ? 127 : 0))
+               panel_led_last[i] = on;
      }
 }
 

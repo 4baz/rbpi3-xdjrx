@@ -1,11 +1,11 @@
 # Notice, copyright and legal
 
-**rbpi4b** is an independent interoperability/preservation project. It is
+**rbpi3-xdjrx** is an independent interoperability/preservation project. It is
 **not affiliated with, endorsed by, or sponsored by** Pioneer DJ, AlphaTheta
 Corporation, Denon DJ, inMusic, Raspberry Pi Ltd, or any of their subsidiaries.
 
 The goal is to run the Pioneer DJ XDJ-RX3 standalone rekordbox player (`rbp`,
-called `rb` internally) on a **Raspberry Pi 4B**, using the same
+called `rb` internally) on a **Raspberry Pi**, using the same
 soft-float-chroot + shim approach that the related Denon DJ **Prime GO** port
 established. The project began as a port to a Denon DJ **SC Live 4**
 (`JP21` / `SCX-4`, Rockchip RK3288, Engine OS); that target has been dropped and
@@ -23,7 +23,7 @@ reference the port was built from.
 
 ## What this repository does **not** contain
 
-* No XDJ-RX3/CDJ firmware (`.UPD`), no decrypted firmware ISO, no `rootfs`, no
+* No XDJ-RX/CDJ firmware (`.UPD`), no decrypted firmware ISO, no `rootfs`, no
   `rbp`/`rb` executable, and no other Pioneer/AlphaTheta binaries.
 * No Denon DJ / Engine OS files or binaries.
 * No Raspberry Pi OS image or Raspberry Pi bootloader files.

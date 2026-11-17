@@ -55,6 +55,11 @@ Notes:
 - The ERGO mixer CUE buttons select RX headphone cue for channels 1 and 2.
   Headphone MIX and LEVEL use their RX mixer controls; these controls have been
   confirmed on the Pi. The cue LEDs mirror the RX panel's reported LED state.
+- The ERGO SYNC LEDs mirror the RX panel's per-deck SYNC state, including
+  flashing. Hardware verification is still needed.
+- The ERGO does not currently have a verified startup position query. Move each
+  fader and knob to synchronize it after startup; until then the RX uses its
+  own values, which may not match the controller's physical positions.
 - The ERGO tempo faders and jogs use RX-specific events; their physical direction,
   jog sensitivity and scratching still need confirmation on the Pi. `TEMPO_REV`
   and `JOG_REV` reverse their respective directions if needed.

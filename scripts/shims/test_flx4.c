@@ -111,8 +111,8 @@ static int checks, failures;
 static int led_sent_n;
 static int led_sent_ch[16], led_sent_note[16], led_sent_value[16];
 static int led_send_ok = 1;
-static int rx_test_cue_leds = -1;
-int rx_panel_cue_leds(void) { return rx_test_cue_leds; }
+static int rx_test_panel_leds = -1;
+int rx_panel_leds(void) { return rx_test_panel_leds; }
 
 int midi_note(int ch, int note, int value)
 {
@@ -127,11 +127,13 @@ int midi_note(int ch, int note, int value)
      return 1;
 }
 
-static void rx_tx_frame(unsigned char frame[24], int bits)
+static void rx_tx_frame(unsigned char frame[24], int cue, int sync)
 {
      unsigned crc = 0xffff;
      memset(frame, 0, 24);
-     frame[10] = bits;
+     frame[10] = cue;
+     frame[1] = (sync & 1) ? 0x40 : 0;
+     frame[5] = (sync & 2) ? 0x40 : 0;
      for (int i = 0; i < 20; i += 4) {
           for (int j = 3; j >= 0; j--) {
                crc ^= frame[i + j];
@@ -1457,33 +1459,49 @@ int main(void)
      map_ergo.build();
      {
           unsigned char frame[24];
-          rx_tx_frame(frame, 0x20);
-          CHECK(rx_panel_cue_leds() == -1, "RX cue LED state must start unknown");
-          CHECK(rx_panel_cue_decode(frame, 23) == -1, "short RX LED frame must be rejected");
+          rx_tx_frame(frame, 0x20, 1);
+          CHECK(rx_panel_leds() == -1, "RX LED state must start unknown");
+          CHECK(rx_panel_led_decode(frame, 23) == -1, "short RX LED frame must be rejected");
           frame[22] ^= 1;
-          CHECK(rx_panel_cue_decode(frame, sizeof frame) == -1, "bad RX LED CRC must be rejected");
-          CHECK(rx_panel_cue_leds() == -1, "invalid RX LED frames must not change state");
+          CHECK(rx_panel_led_decode(frame, sizeof frame) == -1, "bad RX LED CRC must be rejected");
+          CHECK(rx_panel_leds() == -1, "invalid RX LED frames must not change state");
           frame[22] ^= 1;
-          rx_test_cue_leds = rx_panel_cue_decode(frame, sizeof frame);
-          CHECK(rx_test_cue_leds == 1, "valid RX LED frame rejected");
+          rx_test_panel_leds = rx_panel_led_decode(frame, sizeof frame);
+          CHECK(rx_test_panel_leds == (RX_PANEL_CUE_1 | RX_PANEL_SYNC_1),
+                "RX CUE 1 and SYNC 1 must decode independently");
           led_send_ok = 0;
           map_ergo.tick();
           CHECK(led_sent_n == 0, "failed LED sends must not be cached");
           led_send_ok = 1;
           map_ergo.tick();
-          CHECK(led_sent_n == 2 && led_sent_ch[0] == 6 &&
+          CHECK(led_sent_n == 4 && led_sent_ch[0] == 6 &&
                 led_sent_note[0] == 84 && led_sent_value[0] == 127 &&
                 led_sent_ch[1] == 6 && led_sent_note[1] == 85 &&
-                led_sent_value[1] == 0,
-                "RX cue state must light only ERGO CUE 1");
+                led_sent_value[1] == 0 &&
+                led_sent_ch[2] == 0 && led_sent_note[2] == 88 &&
+                led_sent_value[2] == 127 && led_sent_ch[3] == 1 &&
+                led_sent_note[3] == 88 && led_sent_value[3] == 0,
+                "RX state must light only ERGO CUE 1 and SYNC 1");
           led_sent_n = 0;
-          rx_tx_frame(frame, 0x10);
-          rx_test_cue_leds = rx_panel_cue_decode(frame, sizeof frame);
-          CHECK(rx_test_cue_leds == 2, "second RX LED frame rejected");
+          rx_tx_frame(frame, 0x10, 2);
+          rx_test_panel_leds = rx_panel_led_decode(frame, sizeof frame);
+          CHECK(rx_test_panel_leds == (RX_PANEL_CUE_2 | RX_PANEL_SYNC_2),
+                "RX CUE 2 and SYNC 2 must decode independently");
           map_ergo.tick();
-          CHECK(led_sent_n == 2 && led_sent_note[0] == 84 && led_sent_value[0] == 0 &&
-                led_sent_note[1] == 85 && led_sent_value[1] == 127,
-                "RX cue state must light only ERGO CUE 2");
+          CHECK(led_sent_n == 4 && led_sent_note[0] == 84 && led_sent_value[0] == 0 &&
+                led_sent_note[1] == 85 && led_sent_value[1] == 127 &&
+                led_sent_ch[2] == 0 && led_sent_note[2] == 88 && led_sent_value[2] == 0 &&
+                led_sent_ch[3] == 1 && led_sent_note[3] == 88 && led_sent_value[3] == 127,
+                "RX state must light only ERGO CUE 2 and SYNC 2");
+          led_sent_n = 0;
+          map_ergo.tick();
+          CHECK(led_sent_n == 0, "unchanged RX LEDs must not be resent on every tick");
+          map_ergo.tick();
+          CHECK(led_sent_n == 4, "RX LEDs must be periodically resent");
+          rx_tx_frame(frame, 0x30, 3);
+          CHECK(rx_panel_led_decode(frame, sizeof frame) ==
+                (RX_PANEL_CUE_1 | RX_PANEL_CUE_2 | RX_PANEL_SYNC_1 | RX_PANEL_SYNC_2),
+                "both decks' RX LEDs must be independently decodable");
      }
      for (int channel = 0; channel < 2; channel++) {
           struct snd_seq_event ev = {0};

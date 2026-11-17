@@ -360,6 +360,7 @@ extern const struct ctrl_map map_ergo;
  * nothing under MIDI_MAP=kbd is a selection rather than an omission. A caller
  * that gets NULL sends nothing -- it must not fall back to another map's notes. */
 const struct led_notes *ctrl_sel_leds(void);
+int ctrl_sel_is_ergo(void);
 
 /* Has the MIDI surface been selected yet? The front end picks it on midi_thread,
  * and every thread is started together from the constructor, so a thread that

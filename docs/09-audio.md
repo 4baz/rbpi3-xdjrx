@@ -1,5 +1,10 @@
 # 09 — Audio
 
+The periodic master `writei` log includes cumulative `xruns`, `write_errors`,
+and `short_writes` from the initial device write, before any recovery retry.
+An increase can help correlate crackles with the USB audio path; zero does not
+rule out problems elsewhere.
+
 On the Pi the audio path is the **DDJ-FLX4's USB audio**: master out to its
 RCA/XLR outputs, headphones and cue out of its jack. There is one real device
 and one real stream; everything the shim does is about putting rbp's three
@@ -1204,4 +1209,3 @@ with; a pair beyond it is dropped with a log line rather than folded down. That 
 one-shot per process, so `pairs_tick()` clears the flag when the map changes — otherwise a live
 change to a pair the card does not have would be **silent**, which is the failure this whole
 file keeps paying for.
-

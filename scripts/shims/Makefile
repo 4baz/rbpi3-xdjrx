@@ -653,7 +653,7 @@ pcmprobe: ../../tools/pcmprobe.c
 # pins the glyph and stops exactly where the device begins. The production
 # fb_cursor.o is linked and the kernel is scripted, so what is pinned is the retry
 # and the rectangle -- see that file's header.
-TESTS := test_point test_audio test_midi test_flx4 test_kbd test_cursor \
+TESTS := test_point test_audio test_mixer_defaults test_midi test_flx4 test_kbd test_cursor \
          test_evdev test_cursor_dev test_menu test_side \
          test_menu_dev test_util test_wave test_fx test_hc test_fxpad \
          test_led_table test_plinn_scan test_controllers test_usblabel test_netalias \
@@ -915,6 +915,11 @@ test_audio: test_audio.c s24pack.c s24pack.h mirror_policy.c mirror_policy.h \
 	$(CC) -O2 -march=armv5t -mfloat-abi=soft -fno-stack-protector \
 	    -Wall -Wextra -static -o $@ test_audio.c s24pack.c mirror_policy.c \
 	    master_policy.c pace_policy.c -lm
+
+test_mixer_defaults: test_mixer_defaults.c rbp_vu.c rbp_vu.h
+	$(CC) -O2 -march=armv5t -mfloat-abi=soft -fno-stack-protector \
+	    -ffunction-sections -fdata-sections -Wall -Wextra -static \
+	    -Wl,--gc-sections -o $@ test_mixer_defaults.c -lm
 
 # test_midi links the PRODUCTION objects -- map_jp21.o, ctrl_map.o, mididump.o,
 # shimutil.o, shmstate.o -- rather than copies of them, so it cannot pass against

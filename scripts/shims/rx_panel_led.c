@@ -1,6 +1,6 @@
 #include "rx_panel_led.h"
 
-int rx_panel_cue_decode(const uint8_t *frame, size_t length)
+int rx_panel_led_decode(const uint8_t *frame, size_t length)
 {
     unsigned crc = 0xffff;
 
@@ -16,6 +16,8 @@ int rx_panel_cue_decode(const uint8_t *frame, size_t length)
     crc ^= 0xffff;
     if (crc != (unsigned)(frame[22] | (frame[23] << 8)))
         return -1;
-    return ((frame[10] & 0x20) ? 1 : 0) |
-           ((frame[10] & 0x10) ? 2 : 0);
+    return ((frame[10] & 0x20) ? RX_PANEL_CUE_1 : 0) |
+           ((frame[10] & 0x10) ? RX_PANEL_CUE_2 : 0) |
+           ((frame[1] & 0x40) ? RX_PANEL_SYNC_1 : 0) |
+           ((frame[5] & 0x40) ? RX_PANEL_SYNC_2 : 0);
 }

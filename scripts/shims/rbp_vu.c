@@ -239,6 +239,10 @@ static int vu_encode(int steps)
  * t is the caller's 40 Hz tick; the work happens every other second. */
 static void mixer_defaults_tick(unsigned long t)
 {
+     /* These constants are RX3 keycodes: on RX, K_MASTERLVL is headphone
+      * level. Reasserting it overrides the operator's headphone knob. */
+     if (rbp_on_rx_profile())
+          return;
      if (t < 1200 && (t % 80) == 0) {
           int asked = led_query_absolute();
           /* rbp's mixer inits after we load, so the one-shot unity master

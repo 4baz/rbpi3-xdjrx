@@ -712,7 +712,8 @@ static void led_refresh(void)
           tr = rbp_transport_get(i);
           if (tr < 0)
                continue;
-          led_send(sch, n->n_sync, &led_last[i][L_SYNC], tr & RBP_TRANSPORT_SYNC);
+          if (!rbp_on_rx_profile() || !ctrl_sel_is_ergo())
+               led_send(sch, n->n_sync, &led_last[i][L_SYNC], tr & RBP_TRANSPORT_SYNC);
           led_send(sch, n->n_cue, &led_last[i][L_CUE], tr & RBP_TRANSPORT_CUE);
           led_send(sch, n->n_play, &led_last[i][L_PLAY], tr & RBP_TRANSPORT_PLAY);
           led_send(sch, n->n_keylock, &led_last[i][L_KEYLOCK], mt);

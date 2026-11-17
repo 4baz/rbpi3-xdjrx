@@ -60,7 +60,7 @@ int cc_to_10bit(int v)
      return (v << 3) | (v >> 4);
 }
 
-int rx_panel_cue_leds(void)
+int rx_panel_leds(void)
 {
      uint8_t frame[24];
      const volatile uint8_t *panel;
@@ -83,7 +83,7 @@ int rx_panel_cue_leds(void)
      }
      for (size_t i = 0; i < sizeof frame; i++)
           frame[i] = panel[RX_PANEL_TX_OFF + i];
-     return rx_panel_cue_decode(frame, sizeof frame);
+     return rx_panel_led_decode(frame, sizeof frame);
 }
 
 static int rx_loop_available(int deck)
