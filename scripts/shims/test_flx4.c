@@ -101,12 +101,48 @@
 #include "rbp_led.h"       /* led_loop_armed */
 #include "ctrl_map.h"
 #include "mididump.h"
+#include "rx_panel_led.h"
 
 #ifndef FLX4_FIXTURE
 #error "FLX4_FIXTURE must name the dump to replay (-DFLX4_FIXTURE=...); see the Makefile"
 #endif
 
 static int checks, failures;
+static int led_sent_n;
+static int led_sent_ch[16], led_sent_note[16], led_sent_value[16];
+static int led_send_ok = 1;
+static int rx_test_cue_leds = -1;
+int rx_panel_cue_leds(void) { return rx_test_cue_leds; }
+
+int midi_note(int ch, int note, int value)
+{
+     if (!led_send_ok)
+          return 0;
+     if (led_sent_n < 16) {
+          led_sent_ch[led_sent_n] = ch;
+          led_sent_note[led_sent_n] = note;
+          led_sent_value[led_sent_n] = value;
+     }
+     led_sent_n++;
+     return 1;
+}
+
+static void rx_tx_frame(unsigned char frame[24], int bits)
+{
+     unsigned crc = 0xffff;
+     memset(frame, 0, 24);
+     frame[10] = bits;
+     for (int i = 0; i < 20; i += 4) {
+          for (int j = 3; j >= 0; j--) {
+               crc ^= frame[i + j];
+               for (int bit = 0; bit < 8; bit++)
+                    crc = (crc >> 1) ^ ((crc & 1) ? 0x8408 : 0);
+          }
+     }
+     crc ^= 0xffff;
+     frame[22] = crc & 0xff;
+     frame[23] = crc >> 8;
+}
 
 #define CHECK(cond, ...) do {                                       \
         checks++;                                                   \
@@ -1416,9 +1452,39 @@ int main(void)
            n, fixture_events);
 
      ctrl_bindings_reset();
-     setenv("MIDI_MAP", "ergo", 1);
+     setenv("MIDI_MAP", "flx4", 1);
      test_rx_profile = 1;
      map_ergo.build();
+     {
+          unsigned char frame[24];
+          rx_tx_frame(frame, 0x20);
+          CHECK(rx_panel_cue_leds() == -1, "RX cue LED state must start unknown");
+          CHECK(rx_panel_cue_decode(frame, 23) == -1, "short RX LED frame must be rejected");
+          frame[22] ^= 1;
+          CHECK(rx_panel_cue_decode(frame, sizeof frame) == -1, "bad RX LED CRC must be rejected");
+          CHECK(rx_panel_cue_leds() == -1, "invalid RX LED frames must not change state");
+          frame[22] ^= 1;
+          rx_test_cue_leds = rx_panel_cue_decode(frame, sizeof frame);
+          CHECK(rx_test_cue_leds == 1, "valid RX LED frame rejected");
+          led_send_ok = 0;
+          map_ergo.tick();
+          CHECK(led_sent_n == 0, "failed LED sends must not be cached");
+          led_send_ok = 1;
+          map_ergo.tick();
+          CHECK(led_sent_n == 2 && led_sent_ch[0] == 6 &&
+                led_sent_note[0] == 84 && led_sent_value[0] == 127 &&
+                led_sent_ch[1] == 6 && led_sent_note[1] == 85 &&
+                led_sent_value[1] == 0,
+                "RX cue state must light only ERGO CUE 1");
+          led_sent_n = 0;
+          rx_tx_frame(frame, 0x10);
+          rx_test_cue_leds = rx_panel_cue_decode(frame, sizeof frame);
+          CHECK(rx_test_cue_leds == 2, "second RX LED frame rejected");
+          map_ergo.tick();
+          CHECK(led_sent_n == 2 && led_sent_note[0] == 84 && led_sent_value[0] == 0 &&
+                led_sent_note[1] == 85 && led_sent_value[1] == 127,
+                "RX cue state must light only ERGO CUE 2");
+     }
      for (int channel = 0; channel < 2; channel++) {
           struct snd_seq_event ev = {0};
           ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
@@ -1517,7 +1583,7 @@ int main(void)
           static const struct { int note, key; } buttons[] = {
                {12, 0x4102}, {88, 0x410b}, {16, 0x410d}, {17, 0x410f},
                {26, 0x4109}, {27, 0x4108}, {92, 0x4112},
-               {54, 0x430e}
+               {54, 0x430e}, {21, 0x4104}
           };
           for (int channel = 0; channel < 2; channel++) {
                for (size_t j = 0; j < sizeof(buttons) / sizeof(buttons[0]); j++) {
@@ -1601,7 +1667,7 @@ int main(void)
                 "ERGO deck %d jog idle mismatch", i);
      {
           static const struct { int cc, key, ch; } controls[] = {
-               {0, 0x4405, 0},
+               {0, 0x4405, 0}, {1, 0x4402, 0}, {2, 0x4403, 0},
                {3, 0x5007, 1}, {4, 0x5007, 2},
                {7, 0x5008, 1}, {8, 0x5008, 2},
                {11, 0x5009, 1}, {12, 0x5009, 2},
@@ -1636,6 +1702,35 @@ int main(void)
           }
      }
      {
+          for (int channel = 0; channel < 2; channel++) {
+               struct snd_seq_event ev = {0};
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+               ev.data.note.channel = 6;
+               ev.data.note.note = 84 + channel;
+               ev.data.note.velocity = 127;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               map_ergo.event(&ev);
+               ev.data.note.velocity = 0;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 2 && sent[0].key == 0x5014 &&
+                     sent[0].op == OP_PRESS && sent[0].ch == channel + 1 &&
+                     sent[1].key == 0x5014 && sent[1].op == OP_RELEASE &&
+                     sent[1].ch == channel + 1,
+                     "ERGO mixer CUE %d must send one RX press/release", channel + 1);
+          }
+          for (int channel = 2; channel < 4; channel++) {
+               struct snd_seq_event ev = {0};
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+               ev.data.note.channel = channel;
+               ev.data.note.note = 21;
+               ev.data.note.velocity = 127;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 0, "ERGO vinyl layer %d must not alias RX decks", channel);
+          }
+     }
+     {
           struct snd_seq_event ev = {0};
           ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
           ev.data.control.channel = 6;
@@ -1655,6 +1750,82 @@ int main(void)
                 "ERGO master CC0/32 midpoint did not reach RX master volume");
           CHECK(g_master_gain == 1.0f && g_mirror_gain == 1.0f,
                 "ERGO master must not apply a second shim gain");
+     }
+
+     {
+          struct snd_seq_event ev = {0};
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 0;
+          ev.data.note.note = 20;
+          ev.data.note.velocity = 127;
+          int starts = rx_loop_starts[0];
+          map_ergo.event(&ev);
+          ev.data.note.velocity = 0;
+          map_ergo.event(&ev);
+          ev.data.note.velocity = 127;
+          map_ergo.event(&ev);
+          CHECK(rx_loop_starts[0] == starts + 2,
+                "ERGO velocity-zero NOTEON must release the loop knob");
+     }
+     {
+          struct snd_seq_event ev = {0};
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 0;
+          ev.data.note.note = 71;
+          ev.data.note.velocity = 127;
+
+          ctrl_bindings_reset();
+          setenv("MIDI_MAP", "ergo", 1);
+          map_flx4.build();
+          sent_n = 0;
+          map_flx4.event(&ev);
+          CHECK(sent_n == 0, "FLX4 descriptor must not use ERGO or DDJ-400 bindings");
+
+          ctrl_bindings_reset();
+          map_ddj400.build();
+          sent_n = 0;
+          map_ddj400.event(&ev);
+          CHECK(sent_n == 1 && sent[0].key == K_SLIP && sent[0].op == OP_PRESS,
+                "DDJ-400 descriptor must select its SLIP binding despite MIDI_MAP");
+
+          ctrl_bindings_reset();
+          setenv("MIDI_MAP", "ddj400", 1);
+          map_ergo.build();
+          ev.data.note.note = 20;
+          int starts = rx_loop_starts[0];
+          map_ergo.event(&ev);
+          CHECK(rx_loop_starts[0] == starts + 1 &&
+                rx_loop_beats[0] == 4 && rx_loop_divisor[0] == 1,
+                "rebuilding ERGO must reset its loop press and default size");
+          ev.data.note.note = 71;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 0, "ERGO descriptor must not retain DDJ-400 bindings");
+          ev.data.note.note = 92;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 1 && sent[0].key == 0x4112 && sent[0].op == OP_PRESS,
+                "ERGO descriptor must restore RX long-SYNC behavior after switching");
+
+          ctrl_bindings_reset();
+          setenv("MIDI_MAP", "ergo", 1);
+          map_flx4.build();
+          sent_n = 0;
+          map_flx4.event(&ev);
+          CHECK(sent_n == 2 && sent[0].key == K_MASTER &&
+                sent[0].op == OP_PRESS && sent[1].op == OP_RELEASE,
+                "FLX4 descriptor must restore generic long-SYNC behavior after switching");
+
+          ctrl_bindings_reset();
+          test_rx_profile = 0;
+          setenv("MIDI_MAP", "flx4", 1);
+          map_ergo.build();
+          ev.data.note.channel = 2;
+          ev.data.note.note = 114;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 1 && sent[0].key == K_LOAD && sent[0].ch == 1,
+                "non-RX ERGO deck C must retain LOAD binding");
      }
 
      printf("test_flx4: %d checks, %d failures\n", checks, failures);

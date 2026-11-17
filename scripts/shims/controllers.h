@@ -25,7 +25,8 @@
  * pin every token.
  *
  * WHAT A ROW IS NOT. The note/CC bindings and the LED tables are NOT here. Those
- * are already one coherent file per surface (map_flx4.c, map_jp21.c), and the
+ * live in the surface maps (map_flx4.c, map_ergo.c, map_jp21.c), with common
+ * Pioneer behavior shared by the FLX4, DDJ-400 and ERGO maps, and the
  * sibling does not centralise them either. `kbd` and `none` are MAPS and have no
  * row: a keyboard is not a controller and neither is nothing. A surface with no
  * row keeps working -- the maps are selected by name, not through this table --

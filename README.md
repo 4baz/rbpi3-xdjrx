@@ -1,22 +1,40 @@
-# rbpi4b
+# rbpi3-xdjrx
 
-Credit to: [![Instagram: @i.erhan.es](https://img.shields.io/badge/Instagram-%40i.erhan.es-E4405F?logo=instagram&logoColor=white)](https://instagram.com/i.erhan.es) for the original base of this code.
+## xdj-rx rekordbox player running on the raspberri pi 3b
 
-**Run the Pioneer DJ XDJ-RX3 *rekordbox* standalone player on a Raspberry Pi 4B.**
+this project started because thanks to AI making a raspberry pi 4 $200+ AUD i didnt want to buy one to run 
+rbpi4b (xdj-rx3 for pi) so i used copilot a few litres of water to get the xdj-rx software running as its specs are closer to that of a pi3   
+This project is mostly ai slop at the moment, i do plan on cleaning up/deslopifying in the future 
+currently more of a proof of concept, runs well on a raspberry pi 3b 
+
+
+
+
+Credit to: 
+
+https://github.com/thomas-alrek/xdj-rx-tools
+https://github.com/salesforcedoc/rbpi4b
+https://github.com/mortalinstrument/xdj-rx3-pi4
+https://github.com/xsploit/rx3-pi
+
+
+
+
+
+**Run the Pioneer DJ XDJ-RX *rekordbox* standalone player on a Raspberry Pi 3B.**
 
 rbpi4b runs the ARM32 `rekordbox` player application (`rbp`, called `rb`
-internally) extracted from **XDJ-RX3 firmware v1.20** on a **Raspberry Pi 4B**
+internally) extracted from **XDJ-RX firmware v1.50** on a **Raspberry Pi 3B**
 running **Pi OS Lite 32-bit**, with an **HDMI monitor** and a **Pioneer
-DDJ-FLX4** over USB.
+DDJ-FLX4 (untested)** & a **DDJ-ERGO-V** over USB.
 
-The port started from a working Denon SC Live 4 port, which in turn derived from
-the Prime GO work; the differences between them are the whole reason this was
-tractable, and they are set out in [docs/13](docs/13-raspberrypi4.md).
 
-> rbpi4b is an **interoperability / preservation** project. It contains **no
-> Pioneer/AlphaTheta firmware, no `rbp` binary, no Denon software and no
-> rekordbox content.** You supply your own extracted assets. See
+> this project contains no pioneer/alphatheta firmware supply your own extracted assets from the pioneer
+>gnu opensource website & xdj-rx firmware .UPD download
 > [NOTICE.md](NOTICE.md).
+
+
+>the rest of this readme is leftover from the rpbi4b readme which this project started as a fork of
 
 ---
 

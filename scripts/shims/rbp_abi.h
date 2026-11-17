@@ -360,6 +360,9 @@
 #define K_VINYL      0x4104
 #define K_JOG_TOUCH  0x4306    /* jog plate touch  (push/release) */
 #define K_JOG_ROT    0x4305    /* jog wheel rotate: f=speed(rev/s) l=pos */
+#define RX_PANEL_CONTROLLER_OFF 0x4c
+#define RX_PANEL_CONTROLLER_VTABLE 0x00420700UL
+#define RX_PANEL_TX_OFF 0x6c
 #define K_TEMPO_RANGE 0x4107   /* tempo range select (+-6/10/16/WIDE) */
 #define K_MT         0x4108    /* master tempo (key lock) toggle */
 #define K_TEMPO_SLIDER 0x4109  /* tempo slider (pitch fader) */

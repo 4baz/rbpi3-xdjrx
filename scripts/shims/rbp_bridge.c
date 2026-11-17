@@ -42,6 +42,7 @@
 #include "rbp_abi.h"
 #include "rbp_key.h"
 #include "rbp_bridge.h"
+#include "rx_panel_led.h"
 #include "plinn_scan.h"
 
 /* The key path -- is_rbp_process(), get_key_manager() and send_rx_key*() -- is
@@ -57,6 +58,32 @@ int cc_to_10bit(int v)
      if (v < 0) v = 0;
      if (v > 127) v = 127;
      return (v << 3) | (v >> 4);
+}
+
+int rx_panel_cue_leds(void)
+{
+     uint8_t frame[24];
+     const volatile uint8_t *panel;
+     void *manager;
+     static int bad_panel_logged;
+     if (!rbp_on_rx_profile() || !is_rbp_process())
+          return -1;
+     manager = *(void **)UI_OBJ_MGR_GLOBAL_RX;
+     if (!manager)
+          return -1;
+     panel = *(const volatile uint8_t **)((const char *)manager + RX_PANEL_CONTROLLER_OFF);
+     if (!panel)
+          return -1;
+     if (*(const volatile uint32_t *)panel != RX_PANEL_CONTROLLER_VTABLE) {
+          if (!bad_panel_logged) {
+               klog("knobshim2: RX panel controller has unexpected vtable\n");
+               bad_panel_logged = 1;
+          }
+          return -1;
+     }
+     for (size_t i = 0; i < sizeof frame; i++)
+          frame[i] = panel[RX_PANEL_TX_OFF + i];
+     return rx_panel_cue_decode(frame, sizeof frame);
 }
 
 static int rx_loop_available(int deck)

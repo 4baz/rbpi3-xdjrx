@@ -134,6 +134,7 @@
 #include "rbp_vu.h"         /* g_fader / g_fader_seen: the meter scaling input */
 #include "pitch_state.h"    /* g_pitch_norm: what the edge drawers' nudge moves from */
 #include "ctrl_map.h"
+#include "map_pioneer_shared.h"
 
 /* ---- receive channels, 0-based (the list's channel minus one) -------------
  * See the PROVENANCE note above: this is the conversion a dump has to confirm. */
@@ -215,14 +216,6 @@
  * may be moved to the other's channel. 122 is used nowhere else in this map. */
 #define N_LOAD1_SHIFT 104 /* SHIFT + LOAD deck 1 -> rbp's TRACK FILTER panel */
 #define N_LOAD2_SHIFT 122 /* SHIFT + LOAD deck 2 -> rbp's SHORTCUT view */
-/* DDJ-ERGO: DECK C is ch2 note 114, DECK D is ch3 note 114. */
-#define N_DECKCD_ERGO 114
-/* DDJ-ERGO (measured on the unit, aseqdump 2026-11-16): BACK and MENU are on
- * the mixer channel as notes 105/107. */
-#define N_BROWSE_ERGO 101 /* FUNCTION/REC */
-#define N_BACK_ERGO   105
-#define N_MENU_ERGO   107
-#define N_AUTOLOOP_ERGO 20
 #define N_SMART_CFX   0   /* SMART CFX          (+SHIFT 8)  -- no rbp equivalent */
 #define N_SMART_FADER 1   /* SMART FADER        (+SHIFT 9)  -- no rbp equivalent */
 #define N_MONO_STEREO 109 /* Android MONO/STEREO            -- no rbp equivalent */
@@ -245,7 +238,6 @@
  * flx4_pitch(). */
 #define CC_TEMPO_MSB  0
 #define CC_TEMPO_LSB  32
-#define CC_AUTOLOOP_ERGO 19
 #define CC_JOG_WHEEL  33   /* outer ring, relative, 0x40-centred */
 #define CC_JOG_VINYL  34   /* platter when the unit's vinyl mode is ON (default) */
 #define CC_JOG_NOVINYL 35  /* platter when it is OFF (footnote *2: app-set only) */
@@ -385,71 +377,7 @@ static struct pitch_ctrl pitch_state[2] = {
 static int fxch_leg1, fxch_leg2;
 static int fxch_pos = -1;       /* 0 = CH1, 1 = CH2, 2 = CH1&CH2; -1 = unread */
 
-enum flx_profile {
-     FLX_PROFILE_FLX4 = 0,
-     FLX_PROFILE_DDJ400,
-     FLX_PROFILE_ERGO,
-};
-static enum flx_profile flx_profile = FLX_PROFILE_FLX4;
-
-static int rx_loop_size[2] = { 7, 7 };
-static int rx_loop_down[2];
-static const struct { unsigned short beats, divisor; } rx_loop_sizes[] = {
-     {1, 32}, {1, 16}, {1, 8}, {1, 4}, {1, 2}, {1, 1},
-     {2, 1}, {4, 1}, {8, 1}, {16, 1}, {32, 1}
-};
-
-static void rx_ergo_loop_turn(int deck, int value)
-{
-     if (value < 1 || value > 127 || value == 64)
-          return;
-     int steps = value < 64 ? -value : 128 - value;
-     int active = rx_loop_is_active(deck);
-     if (active < 0)
-          return;
-     int direction = steps > 0 ? 1 : -1;
-     int count = steps > 0 ? steps : -steps;
-     if (count > 10)
-          count = 10;
-     while (count--) {
-          int next = rx_loop_size[deck] + direction;
-          if (active) {
-               int result = rx_loop_resize(deck, direction > 0);
-               if (result <= 0) {
-                    klog("knobshim2: RX loop resize deck%d rejected (%d)\n",
-                         deck + 1, result);
-                    break;
-               }
-          }
-          if (next >= 0 && next < (int)(sizeof rx_loop_sizes / sizeof rx_loop_sizes[0]))
-               rx_loop_size[deck] = next;
-     }
-}
-
-static void rx_ergo_loop_press(int deck, int on)
-{
-     if (!on) {
-          rx_loop_down[deck] = 0;
-          return;
-     }
-     if (rx_loop_down[deck])
-          return;
-     rx_loop_down[deck] = 1;
-     int active = rx_loop_is_active(deck);
-     if (active < 0)
-          return;
-     if (active) {
-          send_rx_key(0x4110, OP_PRESS, deck + 1, 0);
-          send_rx_key(0x4110, OP_RELEASE, deck + 1, 0);
-     } else {
-          int idx = rx_loop_size[deck];
-          int result = rx_loop_start(deck, rx_loop_sizes[idx].beats,
-                                     rx_loop_sizes[idx].divisor);
-          if (result <= 0)
-               klog("knobshim2: RX auto loop deck%d start rejected (%d)\n",
-                    deck + 1, result);
-     }
-}
+static enum pioneer_profile flx_profile = PIONEER_FLX4;
 
 /* ---- the note table's dispatch ------------------------------------------ */
 
@@ -465,11 +393,6 @@ static void flx4_log_only(int ch, int note)
 
 static void flx4_note(int ch, int note, int on)
 {
-     if (flx_profile == FLX_PROFILE_ERGO && rbp_on_rx_profile() &&
-         (ch == CH_DECK1 || ch == CH_DECK2) && note == N_AUTOLOOP_ERGO) {
-          rx_ergo_loop_press(ch, on);
-          return;
-     }
      /* CH CUE (list ch 1/2 note 84): rbp's XDJ panel has no per-channel PFL
       * keycode, so this drives the mixer engine directly -- the same call
       * map_jp21.c makes for the previous unit's PFL button. Latching: decided
@@ -510,7 +433,7 @@ static void flx4_note(int ch, int note, int on)
       * with the note not already down is the gesture, and the other one is
       * swallowed, so one press of the button can never send SYNC twice. */
      if ((ch == CH_DECK1 || ch == CH_DECK2) && note == N_SYNC &&
-         !(flx_profile == FLX_PROFILE_ERGO && rbp_on_rx_profile())) {
+         !(flx_profile == PIONEER_ERGO && rbp_on_rx_profile())) {
           static int sync_down[2];
           int d = ch;
           if (on) {
@@ -537,7 +460,7 @@ static void flx4_note(int ch, int note, int on)
       * edge, because rbp's MASTER acts on the press and a stuck one would latch.
       * TODO: unverified. */
      if ((ch == CH_DECK1 || ch == CH_DECK2) && note == N_SYNC_LONG &&
-         !(flx_profile == FLX_PROFILE_ERGO && rbp_on_rx_profile())) {
+         !(flx_profile == PIONEER_ERGO && rbp_on_rx_profile())) {
           if (on) {
                send_rx_key(K_MASTER, OP_PRESS, ch + 1, 0);
                send_rx_key(K_MASTER, OP_RELEASE, ch + 1, 0);
@@ -549,7 +472,7 @@ static void flx4_note(int ch, int note, int on)
 
      /* DDJ-400 FX CH SELECT: three direct buttons on list ch 5.
       * (ch5,n16)->CH1, (ch5,n17)->CH2, (ch5,n20)->MASTER. */
-     if (flx_profile == FLX_PROFILE_DDJ400 && ch == CH_FXA &&
+     if (flx_profile == PIONEER_DDJ400 && ch == CH_FXA &&
          (note == N_FXCH_1 || note == N_FXCH_2 || note == 20) && on) {
           int pos;
           if (note == N_FXCH_1)
@@ -752,46 +675,6 @@ static void flx4_cc_abs(int ch, int cc, int val)
           klog("knobshim2: unmapped ch%d cc%d val=%d\n", ch, cc, val);
 }
 
-static int rx_ergo_mixer_cc(int ch, int cc, int val)
-{
-     static struct mixer_cc {
-          int cc, key, channel, msb, lsb, last;
-     } controls[] = {
-          { 0, 0x4405, 0, -1, 0, -1 },
-          { 3, 0x5007, 1, -1, 0, -1 }, { 4, 0x5007, 2, -1, 0, -1 },
-          { 7, 0x5008, 1, -1, 0, -1 }, { 8, 0x5008, 2, -1, 0, -1 },
-          {11, 0x5009, 1, -1, 0, -1 }, {12, 0x5009, 2, -1, 0, -1 },
-          {15, 0x500a, 1, -1, 0, -1 }, {16, 0x500a, 2, -1, 0, -1 },
-          {19, 0x5011, 1, -1, 0, -1 }, {21, 0x5011, 2, -1, 0, -1 },
-          {31, 0x600f, 0, -1, 0, -1 },
-     };
-
-     if (flx_profile != FLX_PROFILE_ERGO || !rbp_on_rx_profile() || ch != CH_MIX)
-          return 0;
-     for (size_t i = 0; i < sizeof controls / sizeof controls[0]; i++) {
-          struct mixer_cc *c = &controls[i];
-          if (cc != c->cc && cc != c->cc + 32)
-               continue;
-          if (cc == c->cc)
-               c->msb = val;
-          else
-               c->lsb = val;
-          if (c->msb < 0)
-               return 1;
-          int v = ((c->msb * 128 + c->lsb) * 1023 + 8191) / 16383;
-          if (v == c->last)
-               return 1;
-          c->last = v;
-          if (c->key == 0x5011) {
-               g_fader[c->channel] = v;
-               g_fader_seen[c->channel] = 1;
-          }
-          send_rx_key_f(c->key, 4, c->channel, v, (float)v / 1023.0f);
-          return 1;
-     }
-     return 0;
-}
-
 /* BROWSE (list ch 7 CC 64, +SHIFT CC 100): a relative encoder of the OTHER
  * convention -- the list says "Turn clockwise: Increases from 0x01, turn
  * counterclockwise: Decreases from 0x7F", so it is the two's-complement delta
@@ -852,7 +735,7 @@ static void flx4_jog(int ch, int val)
      if (speed < -8.0f) speed = -8.0f;
      s->moving = 1;
      s->speed = speed;
-     int rx_ergo = flx_profile == FLX_PROFILE_ERGO && rbp_on_rx_profile();
+     int rx_ergo = flx_profile == PIONEER_ERGO && rbp_on_rx_profile();
      send_rx_key_fl(rx_ergo ? 0x4306 : K_JOG_ROT,
                     rx_ergo ? 3 : OP_ROTATE, s->sch,
                     rx_ergo ? dp : 0, speed, (long)s->vpos);
@@ -876,7 +759,7 @@ static void flx4_jog_idle(void)
                continue;
           s->moving = 0;
           s->speed = 0.0f;
-          int rx_ergo = flx_profile == FLX_PROFILE_ERGO && rbp_on_rx_profile();
+          int rx_ergo = flx_profile == PIONEER_ERGO && rbp_on_rx_profile();
           send_rx_key_fl(rx_ergo ? 0x4306 : K_JOG_ROT,
                          rx_ergo ? 3 : OP_ROTATE, s->sch, 0, 0.0f,
                          (long)s->vpos);
@@ -908,25 +791,8 @@ static void flx4_pitch(int ch, int cc, int val)
      int pos = s->pos;
      if (pos < 0) pos = 0;
      if (pos > 0x3FFF) pos = 0x3FFF;
-     if (flx_profile == FLX_PROFILE_ERGO && rbp_on_rx_profile()) {
-          int neg = (pos * 1023 + 8191) / 16383;
-          if (tempo_rev)
-               neg = 1023 - neg;
-          int positive = 1023 - neg;
-          int delta = positive - neg;
-          int span = delta >= 0 ? positive - 3 : 1020 - positive;
-          if (span < 1)
-               span = 1;
-          if (delta > span)
-               delta = span;
-          if (delta < -span)
-               delta = -span;
-          float rx_norm = (float)delta / (float)span;
-          pitch_state_set(idx, rx_norm);
-          send_rx_key_fl(0x410a, 4, s->sch, neg, rx_norm, positive);
-          if (tempo_verbose)
-               klog("knobshim2: RX ERGO pitch ch%d pos=0x%04x -> norm=%.3f\n",
-                    ch, pos, (double)rx_norm);
+     if (flx_profile == PIONEER_ERGO && rbp_on_rx_profile()) {
+          ergo_pitch(idx, pos, tempo_rev, tempo_verbose);
           return;
      }
      float norm = ((float)pos - 0x2000) / 8192.0f;
@@ -1056,11 +922,10 @@ static void flx4_mastervol(int cc, int val)
 
 /* ---- the tables ---------------------------------------------------------- */
 
-static void flx4_build(void)
+void pioneer_build(enum pioneer_profile profile)
 {
      int rx = rbp_on_rx_profile();
-     rx_loop_size[0] = rx_loop_size[1] = 7;
-     rx_loop_down[0] = rx_loop_down[1] = 0;
+     flx_profile = profile;
      /* ADDITIVE, deliberately: this fills the tables and never empties them.
       * A keyboard can be live on the other selection at the same time, and the
       * front end clears the tables once before any build -- see the note on
@@ -1087,15 +952,6 @@ static void flx4_build(void)
      jog_verbose = env_on("JOG_VERBOSE", 0);
      tempo_verbose = env_on("TEMPO_VERBOSE", 0);
      tempo_rev = env_on("TEMPO_REV", 0);
-     {
-          const char *midi_map = env_text("MIDI_MAP", "flx4");
-          if (strcmp(midi_map, "ddj400") == 0)
-               flx_profile = FLX_PROFILE_DDJ400;
-          else if (strcmp(midi_map, "ergo") == 0)
-               flx_profile = FLX_PROFILE_ERGO;
-          else
-               flx_profile = FLX_PROFILE_FLX4;
-     }
 
      /* ---- decks (list ch 1/2 -> rch 0/1 -> rbp players 1/2) ----
       * Every control on these two channels is a button; the continuous ones
@@ -1105,10 +961,10 @@ static void flx4_build(void)
           int sch = 1 + d;
           add_note(rch, N_PLAY, K_PLAY, sch);
           add_note(rch, N_CUE, K_CUE, sch);
-          if (rx && flx_profile == FLX_PROFILE_ERGO)
+          if (rx && flx_profile == PIONEER_ERGO)
                add_note(rch, N_SYNC, 0x410b, sch);
           add_note(rch, N_JOG_TOUCH,
-                   rx && flx_profile == FLX_PROFILE_ERGO ? 0x430e : K_JOG_TOUCH,
+                   rx && flx_profile == PIONEER_ERGO ? 0x430e : K_JOG_TOUCH,
                    sch);
           add_note(rch, N_IN, rx ? 0x410d : K_LOOPIN, sch);
           add_note(rch, N_OUT, rx ? 0x410f : K_LOOPOUT, sch);
@@ -1125,7 +981,7 @@ static void flx4_build(void)
            * size table gives that bank as 4, 2, 1, 1/2, 1/4, ... -- a different
            * bank, or the same one read in the other direction; either way the
            * table is not what a fresh entry into this mode shows. */
-          if (!(rx && flx_profile == FLX_PROFILE_ERGO))
+          if (!(rx && flx_profile == PIONEER_ERGO))
                add_note(rch, N_4BEAT, rx ? 0x4110 : K_RELOOP, sch);
           /* The pad-mode buttons select rbp's pad mode, which is what makes the
            * pad keycodes below mean whatever rbp's grid says they mean. The four
@@ -1142,17 +998,15 @@ static void flx4_build(void)
            * outside the documented 0..3, and pressing it again returns it to 0.
            * So 4 is that bank path seen from the outside, and anything reading
            * this mode must not treat 4 as a corrupt read. */
-          if (rx && flx_profile == FLX_PROFILE_ERGO) {
-               add_note(rch, 26, 0x4109, sch);
-               add_note(rch, 27, 0x4108, sch);
-               add_note(rch, N_SYNC_LONG, 0x4112, sch);
+          if (rx && flx_profile == PIONEER_ERGO) {
+               ergo_add_deck(rch);
           } else {
                add_note(rch, N_MODE_HOT, K_HOTCUE, sch);
           }
           add_note(rch, N_MODE_PFX1, K_ALOOP, sch);
           add_note(rch, N_MODE_JUMP, K_SLIPLOOP, sch);
           add_note(rch, N_MODE_SMPL, K_BEATJUMP, sch);
-          if (flx_profile == FLX_PROFILE_DDJ400)
+          if (flx_profile == PIONEER_DDJ400)
                add_note(rch, N_SLIP_DDJ400, K_SLIP, sch);
           /* Known, deliberately not routed (key 0): the SHIFT button and
            * CUE/LOOP CALL > -- rbp's keycode for the call buttons is not
@@ -1261,16 +1115,8 @@ static void flx4_build(void)
       * browse/Load keys are global, and the deck is in the send channel. */
      add_note(CH_MIX, N_LOAD1, rx ? 0x420d : K_LOAD, 1);
      add_note(CH_MIX, N_LOAD2, rx ? 0x420d : K_LOAD, 2);
-     if (flx_profile == FLX_PROFILE_ERGO) {
-          int menu_key = rbp_on_rx_profile() ? 0x020a : K_MENU;
-          if (rx) {
-               add_note(CH_MIX, N_BROWSE_ERGO, 0x0208, CH_GLOBAL);
-          } else {
-               add_note(2, N_DECKCD_ERGO, K_LOAD, 1);
-               add_note(3, N_DECKCD_ERGO, K_LOAD, 2);
-          }
-          add_note(CH_MIX, N_BACK_ERGO, rx ? 0x4206 : K_BACK, CH_GLOBAL);
-          add_note(CH_MIX, N_MENU_ERGO, menu_key, CH_GLOBAL);
+     if (flx_profile == PIONEER_ERGO) {
+          ergo_add_global(rx);
      }
      /* SHIFT + LOAD. The operator's own ask on the glass: "please also make shift
       * load 1 the track filter and shift load 2 the shortcut menu". Both are
@@ -1317,7 +1163,7 @@ static void flx4_build(void)
 /* Everything that has to reach rbp once it exists. Runs after rbp's KeyManager
  * is up and before the first event is dispatched, which is why anything sent
  * here is not lost. */
-static void flx4_startup(void)
+void pioneer_startup(void)
 {
      /* Route each mixer channel to the player behind it. The RX3 does this from
       * its physical DECK/LINE switches and no control surface has any, so the
@@ -1352,24 +1198,19 @@ static void flx4_startup(void)
 }
 
 /* The one thing this map has that is about time: the jog's idle edge. */
-static void flx4_tick(void)
+void pioneer_tick(void)
 {
      flx4_jog_idle();
 }
 
-static void flx4_event(const struct snd_seq_event *ev)
+void pioneer_event(const struct snd_seq_event *ev)
 {
      switch (ev->type) {
      case SNDRV_SEQ_EVENT_CONTROLLER: {
           int ch = ev->data.control.channel;
           int cc = ev->data.control.param;
           int val = ev->data.control.value;
-          if (rx_ergo_mixer_cc(ch, cc, val))
-               break;
-          if (flx_profile == FLX_PROFILE_ERGO && rbp_on_rx_profile() &&
-              (ch == CH_DECK1 || ch == CH_DECK2) && cc == CC_AUTOLOOP_ERGO)
-               rx_ergo_loop_turn(ch, val);
-          else if ((ch == CH_DECK1 || ch == CH_DECK2) &&
+          if ((ch == CH_DECK1 || ch == CH_DECK2) &&
               (cc == CC_TEMPO_MSB || cc == CC_TEMPO_LSB))
                flx4_pitch(ch, cc, val);
           else if ((ch == CH_DECK1 || ch == CH_DECK2) &&
@@ -1426,7 +1267,7 @@ static void flx4_event(const struct snd_seq_event *ev)
  * chosen from these buttons and wrong when rbp's screen moves the mode instead.
  * The operator asked for this and it is deliberately still open: see S9.9 in
  * docs/13-raspberrypi4.md. */
-static const struct led_notes flx4_leds = {
+const struct led_notes pioneer_flx4_leds = {
      /* THE FIRST THREE ROWS EVER MEASURED ON THIS SURFACE, 2026-10-01, and they
       * are the same numbers the same buttons send: the panel's LED for a control
       * uses that control's own input note on its own input channel. Probed by
@@ -1585,35 +1426,34 @@ static const struct led_notes flx4_leds = {
      .n_meter_master_r = -1,
 };
 
+static void flx4_build(void)
+{
+     pioneer_build(PIONEER_FLX4);
+}
+
+static void ddj400_build(void)
+{
+     pioneer_build(PIONEER_DDJ400);
+}
+
 const struct ctrl_map map_flx4 = {
      "flx4",
      flx4_build,
-     flx4_startup,
-     flx4_event,
-     flx4_tick,
+     pioneer_startup,
+     pioneer_event,
+     pioneer_tick,
      NULL,   /* devices(): a MIDI surface, so no evdev reader is started */
      NULL,   /* input(): ditto -- this map never sees an evdev triple */
-     &flx4_leds,
+     &pioneer_flx4_leds,
 };
 
 const struct ctrl_map map_ddj400 = {
      "ddj400",
-     flx4_build,
-     flx4_startup,
-     flx4_event,
-     flx4_tick,
+     ddj400_build,
+     pioneer_startup,
+     pioneer_event,
+     pioneer_tick,
      NULL,
      NULL,
-     &flx4_leds,
-};
-
-const struct ctrl_map map_ergo = {
-     "ergo",
-     flx4_build,
-     flx4_startup,
-     flx4_event,
-     flx4_tick,
-     NULL,
-     NULL,
-     &flx4_leds,
+     &pioneer_flx4_leds,
 };

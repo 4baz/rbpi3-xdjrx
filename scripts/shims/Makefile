@@ -201,6 +201,7 @@ rbp_key.o: rbp_key.c rbp_key.h rbp_abi.h syscalls.h
 #   ctrl_map.o   the binding tables every map fills, and their invalidation
 #   map_flx4.o   the DDJ-FLX4 surface: the target's own tables (unverified --
 #                from Pioneer's published MIDI list, see the file's header)
+#   map_ergo.o   the DDJ-ERGO RX-specific controls, sharing Pioneer dispatch
 #   map_jp21.o   the SC Live 4 / Prime GO surface: its notes, CCs and timing
 #   map_kbd.o    the keyboard fallback: evdev keycodes, no controller, no MIDI
 #   evdev_io.o   the non-MIDI event source (/dev/input/event*), which knows no
@@ -247,13 +248,13 @@ rbp_key.o: rbp_key.c rbp_key.h rbp_abi.h syscalls.h
 # (annotated in the sources), and shmstate.o's globals, which the audio shim
 # reads out of the global scope. (rbp_key.o is the third object outside this
 # list; it is hidden too, and says why in its own rule above.)
-CTRL_OBJS  := ctrlshim.o ctrl_map.o map_flx4.o map_jp21.o map_kbd.o evdev_io.o \
+CTRL_OBJS  := ctrlshim.o ctrl_map.o map_flx4.o map_ergo.o map_jp21.o map_kbd.o evdev_io.o \
               mididump.o rbp_bridge.o rbp_led.o led_table.o plinn_scan.o \
-              rbp_vu.o midi_io.o controllers.o shimutil.o usb_label.o rbp_load.o
+              rbp_vu.o midi_io.o controllers.o shimutil.o usb_label.o rbp_load.o rx_panel_led.o
 CTRL_HDRS  := rbp_abi.h rbp_bridge.h rbp_key.h rbp_led.h led_table.h rbp_vu.h \
               midi_io.h shimutil.h ctrl_map.h mididump.h evdev_io.h syscalls.h \
               shmstate.h plinn_scan.h controllers.h usb_label.h pitch_state.h \
-              rbp_load.h
+              rbp_load.h map_pioneer_shared.h rx_panel_led.h
 knobshim.so: $(CTRL_OBJS) rbp_key.o shmstate.o fader_state.o rbp_transport.o \
              pitch_state.o keylog.o keylog_state.o $(CTRL_HDRS) rbp_transport.h \
              pitch_state.h keylog.h keylog_state.h $(ISOC23_COMPAT_OBJ) \
@@ -956,8 +957,8 @@ test_midi.o: FORCE test_midi.c ctrl_map.h mididump.h shmstate.h rbp_abi.h \
 # of the SC Live 4's (channel, note) pairs, and that comparison needs both
 # tables. It costs one object and no new stubs -- the two maps' rbp calls are the
 # same set, already stubbed below.
-FLX4_TEST_OBJS := test_flx4.o map_flx4.o map_jp21.o ctrl_map.o mididump.o \
-                  shimutil.o shmstate.o pitch_state.o
+FLX4_TEST_OBJS := test_flx4.o map_flx4.o map_ergo.o map_jp21.o ctrl_map.o mididump.o \
+                  shimutil.o shmstate.o pitch_state.o rx_panel_led.o
 
 test_flx4: $(FLX4_TEST_OBJS) tests/midi_flx4.dump
 	$(CC) -O2 -march=armv5t -mfloat-abi=soft -fno-stack-protector \

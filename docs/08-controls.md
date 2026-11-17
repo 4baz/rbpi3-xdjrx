@@ -31,7 +31,8 @@ small set of modules built into `knobshim.so`:
 | `controllers.c` / `.h` | **the controller table**: one row per surface — its map, port-name hint, card id, USB id, init and keepalive SysEx. Pure: no I/O, no globals, no clock, so `test_controllers` links it and runs it on the host. `controllers_cli.c` is the same table with a `main()` for shell callers |
 | `shimutil.c` / `.h` | `klog()`, the clock, and the environment helpers |
 | `shmstate.c` / `.h` | the globals the audio shim reads, and the contract that guards them |
-| `map_flx4.c` | the DDJ-FLX4's tables — written and fixture-tested, tables **unverified** until a dump from the unit, see [15](15-flx4-midi.md) |
+| `map_flx4.c` | the DDJ-FLX4 and DDJ-400 mappings and shared Pioneer dispatch, see [15](15-flx4-midi.md) |
+| `map_ergo.c` / `map_pioneer_shared.h` | DDJ-ERGO RX-specific controls and the interface to shared Pioneer behavior; ERGO currently uses the FLX4 LED table |
 
 The split exists so that a map can exist without duplicating the rbp bridge, and
 so the bridge never learns a controller's note numbers. `CTRL_OBJS` in
@@ -828,7 +829,7 @@ has not been measured for the FLX4 ([15](15-flx4-midi.md)).
 **Which surface a note belongs to is now part of the code, not of this file.**
 This section used to present the SC Live 4's note numbers as if they were the
 port's, which is exactly the mistake the split removes: the numbers live in the
-selected map's `struct led_notes` (`jp21_leds` in `map_jp21.c`, `flx4_leds` in
+selected map's `struct led_notes` (`jp21_leds` in `map_jp21.c`, `pioneer_flx4_leds` in
 `map_flx4.c`), and `rbp_led.c` walks whichever table the front end selected. It
 holds **no note number at all** — see `ctrl_map.h` ("a map never contains an rbp
 address, a bridge never learns a note number") and `ctrl_sel_leds()` in
@@ -897,7 +898,7 @@ The note column names a **field**, not a number, and that is the point: this
 table's notes are the SC Live 4's (`8/9/10/34/35/36/37/38/39` on channels 4/5),
 the FLX4's are not measured, and a bridge that spelled either of them out would
 be wrong for the other surface. Read the number from `map_jp21.c`'s `jp21_leds`
-or `map_flx4.c`'s `flx4_leds`.
+or `map_flx4.c`'s `pioneer_flx4_leds`.
 
 Deck 1 = PlayEngine channel 0, deck 2 = channel 1 (mirrors the RX3
 `EnPlayerChannel`; the JP21 panel MIDI channels are 4/5 — the FLX4's differ).
@@ -909,7 +910,7 @@ releases it.
 
 Not yet driven anywhere, because no FLX4 row has been *seen* to light: pad
 colours (RGB) on the FLX4, its transport/pad/loop notes, LOAD / browse LEDs, and
-the CUE id. Every one of them is `-1` in `flx4_leds` and therefore silent; the
+the CUE id. Every one of them is `-1` in `pioneer_flx4_leds` and therefore silent; the
 pad-mode LEDs (11–13) and the LOAD/browse LEDs are the same open question. The
 loop LEDs are *not* in that list for the JP21 — they are driven there today, and
 the FLX4 has no loop section at all, which is the case the `-1` row exists for.
@@ -928,7 +929,7 @@ The LedStat id for the FX group is **`LedDef::ID + 8`**:
 
 The note numbers are `21/22/23/24/26` on channel 15 for the SC Live 4 —
 `jp21_leds.fx_ch` and its `n_fx[]`. **The FLX4 has only one of these**: it has a
-Beat FX ON/OFF button (`flx4_leds.n_fx[LED_FX_BFX_ONOFF]`, input note 71) and a
+Beat FX ON/OFF button (`pioneer_flx4_leds.n_fx[LED_FX_BFX_ONOFF]`, input note 71) and a
 single Sound Color FX knob rather than four buttons, so the four Colour FX rows
 are permanently `-1` there — the absent case, not a pending one.
 

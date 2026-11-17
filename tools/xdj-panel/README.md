@@ -49,6 +49,12 @@ Notes:
 - The ERGO MASTER knob controls RX master volume through the RX mixer. This is
   separate from the FLX4 hardware-output volume mapping and has been confirmed
   on the Pi.
+- The ERGO VINYL/PULSE MODE button sends RX VINYL mode changes for decks A/B.
+  The hardware sends both deck messages on one press; C/D layer messages are
+  not mapped to RX decks.
+- The ERGO mixer CUE buttons select RX headphone cue for channels 1 and 2.
+  Headphone MIX and LEVEL use their RX mixer controls; these controls have been
+  confirmed on the Pi. The cue LEDs mirror the RX panel's reported LED state.
 - The ERGO tempo faders and jogs use RX-specific events; their physical direction,
   jog sensitivity and scratching still need confirmation on the Pi. `TEMPO_REV`
   and `JOG_REV` reverse their respective directions if needed.
