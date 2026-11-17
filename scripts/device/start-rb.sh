@@ -163,6 +163,9 @@ install_override "$RB_DEPLOY_ROOT/crashcatch.so" "$RB_CHROOT/usr/lib/crashcatch.
 # keeps the loaded copy the deployed one, exactly as for crashcatch above.
 install_override "$RB_DEPLOY_ROOT/netshim.so"    "$RB_CHROOT/usr/lib/netshim.so"
 install_override "$RB_DEPLOY_ROOT/rbp-audio"     "$RB_CHROOT/root/pdj/rbp"
+# thomas-alrek/xdj-rx-tools 3.00 mod library (FLAC, 60 fps, colour waveforms, ...),
+# extracted from xdjrx-3.00.xdjpatch by scripts/xdjmod-extract.sh. Opt-in: RB_XDJMOD=1.
+install_override "$RB_DEPLOY_ROOT/libxdjmod.so"   "$RB_CHROOT/root/pioneer/libxdjmod.so"
 install_override "$RB_DEPLOY_ROOT/libdirectfb_fbdev-rot16.so" \
                  "$RB_CHROOT/usr/lib/directfb-1.4-6/systems/libdirectfb_fbdev.so"
 
@@ -329,6 +332,7 @@ POINT_KIND POINT_DEV POINT_DEBUG POINT_MIN_DWELL_MS POINT_MOUSE_SPEED
 POINT_SWAP_XY POINT_INVERT_X POINT_INVERT_Y POINT_CURSOR POINT_CURSOR_MS
 POINT_QUANTIZE_TAP POINT_MENU POINT_MENU_MOUSE POINT_FX_TOUCH POINT_HOTCUE_TOUCH
 POINT_PADMODE_TAP POINT_DECK_PLAY POINT_BPM_SYNC
+XDJMOD
 AUDIO_DEV AUDIO_CHANNELS AUDIO_MAP AUDIO_MAP_FILE AUDIO_FMT AUDIO_PERIODS AUDIO_MONITOR_PAIR MIXER_MODE
 MIXER_MODE_FILE
 AUDIO_PAIRS_MEMORY
@@ -362,6 +366,9 @@ done
 # shim after the controls shim because it reads globals the controls shim defines.
 # A wrong order fails loudly rather than silently — see scripts/shims/shmstate.h.
 
+if [ "${RB_XDJMOD:-0}" = "1" ] && [ -f "$RB_CHROOT/root/pioneer/libxdjmod.so" ]; then
+    RB_LD_PRELOAD="$RB_LD_PRELOAD:/root/pioneer/libxdjmod.so"
+fi
 echo "start-rb: LD_PRELOAD=$RB_LD_PRELOAD"
 echo "start-rb: DFB_PRESENT=${DFB_PRESENT:-<unset>} DFB_ROTATE=${DFB_ROTATE:-<off>}"
 echo "start-rb: AUDIO_DEV=$AUDIO_DEV MIDI_MAP=$MIDI_MAP POINT_KIND=$POINT_KIND"

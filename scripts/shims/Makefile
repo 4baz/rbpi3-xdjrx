@@ -106,6 +106,11 @@ shmstate.o: shmstate.c shmstate.h
 fader_state.o: fader_state.c rbp_vu.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# exe_name.o exports readlink to interpose it, so like fader_state.o it must NOT be
+# hidden and must not join CTRL_OBJS. `nm -D knobshim.so | grep readlink` must show it.
+exe_name.o: exe_name.c shimutil.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 # rbp_transport.o is the FOURTH object both libraries link, and for the same reason
 # as fader_state.o above: the transport state the edge drawers draw is written by
 # knobshim's LED thread and read by fbshim's painter, and those are two libraries with
@@ -256,11 +261,11 @@ CTRL_HDRS  := rbp_abi.h rbp_bridge.h rbp_key.h rbp_led.h led_table.h rbp_vu.h \
               shmstate.h plinn_scan.h controllers.h usb_label.h pitch_state.h \
               rbp_load.h map_pioneer_shared.h rx_panel_led.h
 knobshim.so: $(CTRL_OBJS) rbp_key.o shmstate.o fader_state.o rbp_transport.o \
-             pitch_state.o keylog.o keylog_state.o $(CTRL_HDRS) rbp_transport.h \
+             pitch_state.o keylog.o keylog_state.o exe_name.o $(CTRL_HDRS) rbp_transport.h \
              pitch_state.h keylog.h keylog_state.h $(ISOC23_COMPAT_OBJ) \
              $(COMPAT)/libc_nonshared.a $(COMPAT)/libpthread_nonshared.a
 	$(CC) $(CFLAGS) -shared -o $@ $(CTRL_OBJS) rbp_key.o shmstate.o \
-	    fader_state.o rbp_transport.o pitch_state.o keylog.o keylog_state.o $(ISOC23_COMPAT_OBJ) \
+	    fader_state.o rbp_transport.o pitch_state.o keylog.o keylog_state.o exe_name.o $(ISOC23_COMPAT_OBJ) \
 	    -lpthread -lm -lc $(LDFLAGS)
 
 $(CTRL_OBJS): %.o: %.c $(CTRL_HDRS)
