@@ -10,16 +10,6 @@ currently more of a proof of concept, runs well on a raspberry pi 3b
 
 
 
-Credit to: 
-
-https://github.com/thomas-alrek/xdj-rx-tools
-https://github.com/salesforcedoc/rbpi4b
-https://github.com/mortalinstrument/xdj-rx3-pi4
-https://github.com/xsploit/rx3-pi
-
-
-
-
 
 **Run the Pioneer DJ XDJ-RX *rekordbox* standalone player on a Raspberry Pi 3B.**
 
@@ -34,7 +24,16 @@ DDJ-FLX4 (untested)** & a **DDJ-ERGO-V** over USB.
 > [NOTICE.md](NOTICE.md).
 
 
->the rest of this readme is leftover from the rpbi4b readme which this project started as a fork of
+Credit to: 
+
+>https://github.com/thomas-alrek/xdj-rx-tools
+>https://github.com/salesforcedoc/rbpi4b
+>https://github.com/mortalinstrument/xdj-rx3-pi4
+>https://github.com/xsploit/rx3-pi
+
+
+
+## the rest of this readme is leftover from the rpbi4b readme which this project started as a fork of
 
 ---
 
