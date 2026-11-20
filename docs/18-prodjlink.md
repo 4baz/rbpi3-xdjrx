@@ -1,5 +1,15 @@
 # 18 — Pro DJ Link
 
+## RX host network protection
+
+On the RX profile, the launcher removes `CAP_NET_ADMIN` from `rbp` and its
+children and enables `no_new_privs`. This prevents the player or its DHCP
+client from reconfiguring the host's network interfaces; NetworkManager still
+manages them. The player can use the existing network but cannot configure its
+own IP address. `RB_RBP_NET_ADMIN=1` in `rb.local.conf` opts out; the RX3
+profile retains its existing default. The protected launch requires `setpriv`
+on the host and fails if it is unavailable.
+
 `rbp` carries Pioneer's whole Pro DJ Link stack, and on this unit it has never
 run, because its network introspection is hardcoded to an interface that is down.
 `netshim.so` points that introspection at the interface that is actually up.

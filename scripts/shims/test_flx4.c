@@ -127,13 +127,23 @@ int midi_note(int ch, int note, int value)
      return 1;
 }
 
-static void rx_tx_frame(unsigned char frame[24], int cue, int sync)
+static int led_sent_value_for(int channel, int note)
+{
+     int last = led_sent_n < 16 ? led_sent_n : 16;
+     for (int i = last - 1; i >= 0; i--)
+          if (led_sent_ch[i] == channel && led_sent_note[i] == note)
+               return led_sent_value[i];
+     return -1;
+}
+
+static void rx_tx_frame(unsigned char frame[24], int cue, int sync, int fx_on)
 {
      unsigned crc = 0xffff;
      memset(frame, 0, 24);
      frame[10] = cue;
      frame[1] = (sync & 1) ? 0x40 : 0;
      frame[5] = (sync & 2) ? 0x40 : 0;
+     frame[19] = fx_on ? 0 : 0x40;
      for (int i = 0; i < 20; i += 4) {
           for (int j = 3; j >= 0; j--) {
                crc ^= frame[i + j];
@@ -1459,7 +1469,7 @@ int main(void)
      map_ergo.build();
      {
           unsigned char frame[24];
-          rx_tx_frame(frame, 0x20, 1);
+          rx_tx_frame(frame, 0x20, 1, 0);
           CHECK(rx_panel_leds() == -1, "RX LED state must start unknown");
           CHECK(rx_panel_led_decode(frame, 23) == -1, "short RX LED frame must be rejected");
           frame[22] ^= 1;
@@ -1474,34 +1484,97 @@ int main(void)
           CHECK(led_sent_n == 0, "failed LED sends must not be cached");
           led_send_ok = 1;
           map_ergo.tick();
-          CHECK(led_sent_n == 4 && led_sent_ch[0] == 6 &&
+          CHECK(led_sent_n == 11 && led_sent_ch[0] == 6 &&
                 led_sent_note[0] == 84 && led_sent_value[0] == 127 &&
                 led_sent_ch[1] == 6 && led_sent_note[1] == 85 &&
                 led_sent_value[1] == 0 &&
                 led_sent_ch[2] == 0 && led_sent_note[2] == 88 &&
                 led_sent_value[2] == 127 && led_sent_ch[3] == 1 &&
-                led_sent_note[3] == 88 && led_sent_value[3] == 0,
+                led_sent_note[3] == 88 && led_sent_value[3] == 0 &&
+                led_sent_ch[4] == 4 && led_sent_note[4] == 67 &&
+                led_sent_value[4] == 0,
                 "RX state must light only ERGO CUE 1 and SYNC 1");
           led_sent_n = 0;
-          rx_tx_frame(frame, 0x10, 2);
+          rx_tx_frame(frame, 0x10, 2, 1);
           rx_test_panel_leds = rx_panel_led_decode(frame, sizeof frame);
-          CHECK(rx_test_panel_leds == (RX_PANEL_CUE_2 | RX_PANEL_SYNC_2),
-                "RX CUE 2 and SYNC 2 must decode independently");
+          CHECK(rx_test_panel_leds == (RX_PANEL_CUE_2 | RX_PANEL_SYNC_2 | RX_PANEL_BEAT_FX),
+                "RX CUE 2, SYNC 2 and active-low FX must decode independently");
           map_ergo.tick();
-          CHECK(led_sent_n == 4 && led_sent_note[0] == 84 && led_sent_value[0] == 0 &&
+          CHECK(led_sent_n == 5 && led_sent_note[0] == 84 && led_sent_value[0] == 0 &&
                 led_sent_note[1] == 85 && led_sent_value[1] == 127 &&
                 led_sent_ch[2] == 0 && led_sent_note[2] == 88 && led_sent_value[2] == 0 &&
-                led_sent_ch[3] == 1 && led_sent_note[3] == 88 && led_sent_value[3] == 127,
+                led_sent_ch[3] == 1 && led_sent_note[3] == 88 && led_sent_value[3] == 127 &&
+                led_sent_ch[4] == 4 && led_sent_note[4] == 67 && led_sent_value[4] == 127,
                 "RX state must light only ERGO CUE 2 and SYNC 2");
           led_sent_n = 0;
           map_ergo.tick();
           CHECK(led_sent_n == 0, "unchanged RX LEDs must not be resent on every tick");
           map_ergo.tick();
-          CHECK(led_sent_n == 4, "RX LEDs must be periodically resent");
-          rx_tx_frame(frame, 0x30, 3);
+          CHECK(led_sent_n == 11, "RX LEDs must be periodically resent");
+          rx_tx_frame(frame, 0x30, 3, 0);
           CHECK(rx_panel_led_decode(frame, sizeof frame) ==
                 (RX_PANEL_CUE_1 | RX_PANEL_CUE_2 | RX_PANEL_SYNC_1 | RX_PANEL_SYNC_2),
                 "both decks' RX LEDs must be independently decodable");
+     }
+     {
+          struct snd_seq_event ev = {0};
+          ctrl_bindings_reset();
+          map_ergo.build();
+          rx_test_panel_leds = -1;
+          led_sent_n = 0;
+          map_ergo.tick();
+          CHECK(led_sent_n == 6 && led_sent_value_for(4, 71) == 0 &&
+                led_sent_value_for(4, 72) == 0 && led_sent_value_for(6, 80) == 0,
+                "local FX LEDs must initialize even without a valid RX frame");
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 4;
+          ev.data.note.note = 71;
+          ev.data.note.velocity = 127;
+          led_sent_n = 0;
+          map_ergo.event(&ev);
+          map_ergo.tick();
+          CHECK(led_sent_value_for(4, 71) == 127, "FX previous LED must light on press");
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          led_sent_n = 0;
+          map_ergo.event(&ev);
+          map_ergo.tick();
+          CHECK(led_sent_value_for(4, 71) == 0, "FX previous LED must go out on release");
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.note = 72;
+          ev.data.note.velocity = 127;
+          led_sent_n = 0;
+          map_ergo.event(&ev);
+          map_ergo.tick();
+          CHECK(led_sent_value_for(4, 72) == 127, "FX next LED must light on press");
+          ev.data.note.velocity = 0;
+          led_sent_n = 0;
+          map_ergo.event(&ev);
+          map_ergo.tick();
+          CHECK(led_sent_value_for(4, 72) == 0, "FX next LED must go out on release");
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 6;
+          ev.data.note.note = 76;
+          ev.data.note.velocity = 127;
+          led_sent_n = 0;
+          map_ergo.event(&ev);
+          map_ergo.tick();
+          CHECK(led_sent_value_for(6, 76) == 127, "FX1 assignment LED must light");
+          ev.data.note.note = 80;
+          led_sent_n = 0;
+          map_ergo.event(&ev);
+          map_ergo.tick();
+          CHECK(led_sent_value_for(6, 76) == 0 && led_sent_value_for(6, 80) == 127,
+                "FX2 assignment must replace the last assignment LED");
+          setenv("LED_DISABLE", "1", 1);
+          ctrl_bindings_reset();
+          map_ergo.build();
+          led_sent_n = 0;
+          map_ergo.tick();
+          CHECK(led_sent_n == 0, "LED_DISABLE must suppress ERGO FX LEDs");
+          unsetenv("LED_DISABLE");
+          ctrl_bindings_reset();
+          map_ergo.build();
+          rx_test_panel_leds = -1;
      }
      for (int channel = 0; channel < 2; channel++) {
           struct snd_seq_event ev = {0};
@@ -1717,6 +1790,119 @@ int main(void)
                map_ergo.event(&ev);
                CHECK(sent[sent_n - 1].param == 0,
                      "ERGO mixer CC%d did not reach RX minimum", controls[j].cc);
+          }
+     }
+     {
+          struct snd_seq_event ev = {0};
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 4;
+          ev.data.note.note = 67;
+          ev.data.note.velocity = 127;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 2 && sent[0].key == 0x4487 &&
+                sent[0].op == OP_PRESS && sent[0].ch == 0 &&
+                sent[1].key == 0x4487 && sent[1].op == OP_RELEASE,
+                "ERGO FX1 ON must send one RX effect press/release");
+          ev.type = SNDRV_SEQ_EVENT_CONTROLLER;
+          ev.data.control.channel = 4;
+          ev.data.control.param = 0;
+          ev.data.control.value = 127;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          ev.data.control.param = 32;
+          map_ergo.event(&ev);
+          CHECK(sent_n >= 1 && sent[sent_n - 1].key == 0x448b &&
+                sent[sent_n - 1].ch == 0 &&
+                sent[sent_n - 1].param == 1023 &&
+                sent[sent_n - 1].fval == 1.0f,
+                "ERGO FX1 MIX must send RX level/depth");
+          ev.data.control.param = 0;
+          ev.data.control.value = 0;
+          map_ergo.event(&ev);
+          ev.data.control.param = 32;
+          map_ergo.event(&ev);
+          CHECK(sent[sent_n - 1].param == 0, "ERGO FX1 MIX minimum");
+          for (int i = 0; i < 10; i++) {
+               static const int expected[] = {0, 7, 6, 5, 4, 3, 2, 1, 0, 7};
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+               ev.data.note.channel = 4;
+               ev.data.note.note = 71;
+               ev.data.note.velocity = 127;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               map_ergo.event(&ev);
+               ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 1 && sent[0].key == 0x448d &&
+                     sent[0].op == 4 && sent[0].ch == 0 &&
+                     sent[0].param == expected[i],
+                     "ERGO FX previous step %d mismatch", i);
+          }
+          for (int i = 0; i < 9; i++) {
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+               ev.data.note.channel = 4;
+               ev.data.note.note = 72;
+               ev.data.note.velocity = 127;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               ev.data.note.velocity = 0;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 1 && sent[0].key == 0x448d &&
+                     sent[0].op == 4 && sent[0].ch == 0 &&
+                     sent[0].param == i % 8,
+                     "ERGO FX next step %d mismatch", i);
+          }
+          for (int channel = 4; channel <= 5; channel++) {
+               for (int note = 71; note <= 73; note++) {
+                    if (channel == 4 && note <= 72)
+                         continue;
+                    ev.type = SNDRV_SEQ_EVENT_NOTEON;
+                    ev.data.note.channel = channel;
+                    ev.data.note.note = note;
+                    ev.data.note.velocity = 127;
+                    sent_n = 0;
+                    map_ergo.event(&ev);
+                    CHECK(sent_n == 0, "ERGO FX parameter note must not send RX3 events");
+               }
+          }
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 5;
+          ev.data.note.note = 67;
+          ev.data.note.velocity = 127;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 0, "ERGO FX2 ON must stay unmapped");
+          for (int i = 0; i < 4; i++) {
+               static const int notes[] = {76, 77, 78, 80};
+               static const int targets[] = {0, 1, 5};
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+               ev.data.note.channel = 6;
+               ev.data.note.note = notes[i];
+               ev.data.note.velocity = 127;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               map_ergo.event(&ev);
+               ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 1 && sent[0].key == 0x448e &&
+                     sent[0].op == 4 && sent[0].ch == 0 &&
+                     sent[0].param == (i == 3 ? 5 : targets[i]),
+                     "ERGO FX target note %d mismatch", notes[i]);
+          }
+          for (int note = 79; note <= 83; note++) {
+               if (note == 80)
+                    continue;
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+               ev.data.note.channel = 6;
+               ev.data.note.note = note;
+               ev.data.note.velocity = 127;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 0, "ERGO assignment note %d must stay unmapped", note);
           }
      }
      {

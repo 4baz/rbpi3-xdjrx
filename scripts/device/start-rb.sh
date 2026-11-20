@@ -481,10 +481,30 @@ echo "start-rb: launching rbp (log: $RBP_LOG)"
 # "rbp is running, drawing nothing" timer on this substring, so it must survive
 # any wording edit here.
 rb_bootmsg "launching rbp (log: $RBP_LOG)"
-nohup chroot "$RB_CHROOT" env \
+set -- nohup chroot "$RB_CHROOT" env \
       "PATH=/bin:/sbin:/usr/bin:/usr/sbin" \
       "LD_PRELOAD=$RB_LD_PRELOAD" \
-      "$RB_LOADER" "$RB_PLAYER" $RB_PLAYER_ARGS \
+      "$RB_LOADER" "$RB_PLAYER" $RB_PLAYER_ARGS
+case "${RB_RBP_NET_ADMIN:-}" in
+    0) RB_RBP_NET_ADMIN_EFFECTIVE=0 ;;
+    1) RB_RBP_NET_ADMIN_EFFECTIVE=1 ;;
+    "")
+        if [ "${RB_RUNTIME_PROFILE:-rx3}" = rx ]; then
+            RB_RBP_NET_ADMIN_EFFECTIVE=0
+        else
+            RB_RBP_NET_ADMIN_EFFECTIVE=1
+        fi ;;
+    *) echo "start-rb: invalid RB_RBP_NET_ADMIN (expected 0 or 1)" >&2; exit 1 ;;
+esac
+if [ "$RB_RBP_NET_ADMIN_EFFECTIVE" = 0 ]; then
+    if ! command -v setpriv >/dev/null 2>&1; then
+        echo "start-rb: setpriv is required to protect the host network" >&2
+        exit 1
+    fi
+    echo "start-rb: denying CAP_NET_ADMIN to rbp and its children"
+    set -- setpriv --bounding-set=-net_admin --inh-caps=-net_admin --no-new-privs "$@"
+fi
+"$@" \
       </dev/null >>"$RBP_LOG" 2>&1 &
 
 # Wait for rbp's DeviceSQL channel to come up, detected by it opening the

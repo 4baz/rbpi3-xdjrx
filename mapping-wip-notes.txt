@@ -1,0 +1,58 @@
+ddj ergo mapping notes
+
+capture of inputs 
+
+aseqdump -p 'PIONEER DDJ-ERGO:0',
+
+
+for fx channel 1:
+
+- fx1 on/off
+ 20:0   Note on                 4, note 67, velocity 127
+ 20:0   Note off                4, note 67
+
+- fx button 1
+20:0   Note on                 4, note 71, velocity 127
+ 20:0   Note off                4, note 71
+
+-fx button 2
+    note 72
+-fx button 3
+    note 73
+
+fx 'control' knob 
+ 20:0   Control change          4, controller 0, value 16
+ 20:0   Control change          4, controller 32, value 72
+
+fx knob 1 
+ 20:0   Control change          4, controller 2, value 42
+ 20:0   Control change          4, controller 34, value 84
+
+ fx knob 2
+20:0   Control change          4, controller 4, value 73
+ 20:0   Control change          4, controller 36, value 100
+
+ fx knob 3
+ 20:0   Control change          4, controller 6, value 70
+ 20:0   Control change          4, controller 38, value 98
+
+fx 1 - 
+ 20:0   Note on                 6, note 76, velocity 127
+ 20:0   Note off                6, note 76
+
+ fx 2 - 
+ 20:0   Note on                 6, note 80, velocity 127
+ 20:0   Note off                6, note 80
+
+ fx 'filter' knob -
+
+    Control change          6, controller 27, value 64
+ 20:0   Control change          6, controller 59, value 31
+ 20:0   Note off                6, note 116
+
+
+
+
+
+
+ ---------------------------------------------------------

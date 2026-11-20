@@ -68,6 +68,19 @@ Notes:
   counterclockwise halves the active loop. The remembered selection may differ
   from a loop made with other controls. Activation, exit and rotation direction
   have been confirmed on the Pi.
+- The ERGO FX1 ON button and MIX knob send the RX Beat FX on/off and level/depth
+  events. The FX1 channel 1, 2 and 3 assignment buttons select deck 1, deck 2
+  and master; the physical FX2 assignment button also selects master. FX1
+  parameter buttons 1 and 2 select the previous and next of eight RX effects.
+  Their first press after startup selects the first effect because the current RX
+  selection cannot yet be read; changing it elsewhere may desynchronize the
+  remembered position. These newer mappings still need hardware verification.
+  Other FX1 parameter controls, its fourth assignment button and the FX2 effects
+  section are not mapped on RX; their RX3 mappings are suppressed.
+- The FX1 ON LED mirrors the RX Beat FX indicator, including its blink. FX1
+  parameter button LEDs light while held. The most recently pressed mapped FX
+  assignment button stays lit; this is controller-side history, not live RX
+  state, and starts unlit after a restart.
 - The legacy `sweep_pi_paneldbg.py` checks the direct-key bridge and does not
   validate the RX frame transport.
 

@@ -19,5 +19,6 @@ int rx_panel_led_decode(const uint8_t *frame, size_t length)
     return ((frame[10] & 0x20) ? RX_PANEL_CUE_1 : 0) |
            ((frame[10] & 0x10) ? RX_PANEL_CUE_2 : 0) |
            ((frame[1] & 0x40) ? RX_PANEL_SYNC_1 : 0) |
-           ((frame[5] & 0x40) ? RX_PANEL_SYNC_2 : 0);
+           ((frame[5] & 0x40) ? RX_PANEL_SYNC_2 : 0) |
+           ((frame[19] & 0x40) ? 0 : RX_PANEL_BEAT_FX);
 }
