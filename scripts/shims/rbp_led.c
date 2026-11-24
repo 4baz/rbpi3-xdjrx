@@ -723,10 +723,12 @@ static void led_refresh(void)
            *   idle            -> both LEDs solid ON
            *   loop-in set     -> LOOP IN blinks, LOOP OUT solid
            *   loop running    -> both blink */
-          led_send(sch, n->n_loopin, &led_last[i][L_LOOPIN],
-                   (looping || armed) ? blink : 1);
-          led_send(sch, n->n_loopout, &led_last[i][L_LOOPOUT],
-                   looping ? blink : 1);
+          if (!rbp_on_rx_profile() || !ctrl_sel_is_ergo()) {
+               led_send(sch, n->n_loopin, &led_last[i][L_LOOPIN],
+                        (looping || armed) ? blink : 1);
+               led_send(sch, n->n_loopout, &led_last[i][L_LOOPOUT],
+                        looping ? blink : 1);
+          }
           led_send(sch, n->n_autoloop, &led_last[i][L_ALOOP], aloop);
 
           /* RGB performance pads: rbp LedDef::ID 18..25 -> whatever note this

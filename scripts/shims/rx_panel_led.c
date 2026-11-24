@@ -20,5 +20,11 @@ int rx_panel_led_decode(const uint8_t *frame, size_t length)
            ((frame[10] & 0x10) ? RX_PANEL_CUE_2 : 0) |
            ((frame[1] & 0x40) ? RX_PANEL_SYNC_1 : 0) |
            ((frame[5] & 0x40) ? RX_PANEL_SYNC_2 : 0) |
-           ((frame[19] & 0x40) ? 0 : RX_PANEL_BEAT_FX);
+           ((frame[19] & 0x40) ? 0 : RX_PANEL_BEAT_FX) |
+           ((frame[3] & 0x40) ? 0 : RX_PANEL_LOOP_IN_1) |
+           ((frame[3] & 0x20) ? 0 : RX_PANEL_LOOP_OUT_1) |
+           ((frame[7] & 0x40) ? 0 : RX_PANEL_LOOP_IN_2) |
+           ((frame[7] & 0x20) ? 0 : RX_PANEL_LOOP_OUT_2) |
+           ((frame[3] & 0x08) ? RX_PANEL_MASTER_TEMPO_1 : 0) |
+           ((frame[7] & 0x08) ? RX_PANEL_MASTER_TEMPO_2 : 0);
 }

@@ -963,9 +963,8 @@ void pioneer_build(enum pioneer_profile profile)
           add_note(rch, N_CUE, K_CUE, sch);
           if (rx && flx_profile == PIONEER_ERGO)
                add_note(rch, N_SYNC, 0x410b, sch);
-          add_note(rch, N_JOG_TOUCH,
-                   rx && flx_profile == PIONEER_ERGO ? 0x430e : K_JOG_TOUCH,
-                   sch);
+          if (!(rx && flx_profile == PIONEER_ERGO))
+               add_note(rch, N_JOG_TOUCH, K_JOG_TOUCH, sch);
           add_note(rch, N_IN, rx ? 0x410d : K_LOOPIN, sch);
           add_note(rch, N_OUT, rx ? 0x410f : K_LOOPOUT, sch);
           /* 4 BEAT / EXIT -> rbp's RELOOP/EXIT: it exits a running loop and

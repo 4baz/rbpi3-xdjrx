@@ -47,26 +47,31 @@ Source  Event                  Ch  Data
 enum {
      ERGO_MIX = 6,
      ERGO_BROWSE = 101,
+     ERGO_BROWSE_SHIFT = 102,
      ERGO_BACK = 105,
      ERGO_MENU = 107,
      ERGO_DECK_CD = 114,
      ERGO_LOOP_PRESS = 20,
      ERGO_LOOP_TURN = 19,
      ERGO_VINYL = 21,
+     ERGO_JOG_TOUCH = 54,
+     ERGO_JOG_TOUCH_ALT = 55,
      ERGO_CUE_1 = 84,
      ERGO_CUE_2 = 85,
      ERGO_FX1 = 4,
      ERGO_FX2 = 5,
      ERGO_FX_ON = 67,
+     ERGO_FILTER_A = 27,
 };
 
 static int loop_size[2] = { 7, 7 };
 static int loop_down[2];
+static unsigned jog_touch_down[2];
 static int fx_mix_msb, fx_mix_lsb, fx_mix_last, fx_on_down;
 static int fx_target_down[8];
 static int fx_select_down[2], fx_select_pos;
 static int fx_select_led[2], fx_target_led;
-static int panel_led_last[11];
+static int panel_led_last[17];
 static unsigned panel_led_ticks;
 static int panel_led_disabled;
 static const struct { unsigned short beats, divisor; } loop_sizes[] = {
@@ -78,19 +83,20 @@ static void ergo_reset(void)
 {
      loop_size[0] = loop_size[1] = 7;
      loop_down[0] = loop_down[1] = 0;
+     jog_touch_down[0] = jog_touch_down[1] = 0;
      fx_mix_msb = -1;
      fx_mix_lsb = 0;
      fx_mix_last = -1;
      fx_on_down = 0;
      fx_select_pos = -1;
-     __atomic_store_n(&fx_target_led, -1, __ATOMIC_RELAXED);
+     __atomic_store_n(&fx_target_led, 0, __ATOMIC_RELAXED);
      for (int i = 0; i < 2; i++) {
           fx_select_down[i] = 0;
           __atomic_store_n(&fx_select_led[i], 0, __ATOMIC_RELAXED);
      }
      for (int i = 0; i < 8; i++)
           fx_target_down[i] = 0;
-     for (int i = 0; i < 11; i++)
+     for (int i = 0; i < 17; i++)
           panel_led_last[i] = -1;
      panel_led_ticks = 0;
      panel_led_disabled = env_on("LED_DISABLE", 0);
@@ -109,6 +115,7 @@ void ergo_add_global(int rx)
 {
      if (rx) {
           add_note(ERGO_MIX, ERGO_BROWSE, 0x0208, CH_GLOBAL);
+          add_note(ERGO_MIX, ERGO_BROWSE_SHIFT, 0x4488, 0);
           add_note(ERGO_MIX, ERGO_CUE_1, 0x5014, 1);
           add_note(ERGO_MIX, ERGO_CUE_2, 0x5014, 2);
      } else {
@@ -241,24 +248,24 @@ static int ergo_event(const struct snd_seq_event *ev)
      if (ev->type == SNDRV_SEQ_EVENT_CONTROLLER) {
           int ch = ev->data.control.channel;
           int cc = ev->data.control.param;
-          if ((ch == ERGO_FX1 || ch == ERGO_FX2) &&
-              (cc == 0 || cc == 2 || cc == 4 || cc == 6 ||
-               cc == 32 || cc == 34 || cc == 36 || cc == 38)) {
-               if (ch == ERGO_FX1 && (cc == 0 || cc == 32)) {
-                    if (cc == 0)
-                         fx_mix_msb = ev->data.control.value;
-                    else
-                         fx_mix_lsb = ev->data.control.value;
-                    if (fx_mix_msb >= 0) {
-                         int v = ((fx_mix_msb * 128 + fx_mix_lsb) * 1023 + 8191) / 16383;
-                         if (v != fx_mix_last) {
-                              fx_mix_last = v;
-                              send_rx_key_f(0x448b, 4, 0, v, (float)v / 1023.0f);
-                         }
+          if (ch == ERGO_MIX && (cc == ERGO_FILTER_A || cc == ERGO_FILTER_A + 32)) {
+               if (cc == ERGO_FILTER_A)
+                    fx_mix_msb = ev->data.control.value;
+               else
+                    fx_mix_lsb = ev->data.control.value;
+               if (fx_mix_msb >= 0) {
+                    int v = ((fx_mix_msb * 128 + fx_mix_lsb) * 1023 + 8191) / 16383;
+                    if (v != fx_mix_last) {
+                         fx_mix_last = v;
+                         send_rx_key_f(0x448b, 4, 0, v, (float)v / 1023.0f);
                     }
                }
                return 1;
           }
+          if ((ch == ERGO_FX1 || ch == ERGO_FX2) &&
+              (cc == 0 || cc == 2 || cc == 4 || cc == 6 ||
+               cc == 32 || cc == 34 || cc == 36 || cc == 38))
+               return 1;
           if (mixer_cc(ch, cc, ev->data.control.value))
                return 1;
           if ((ch == 0 || ch == 1) && cc == ERGO_LOOP_TURN) {
@@ -269,6 +276,16 @@ static int ergo_event(const struct snd_seq_event *ev)
           int ch = ev->data.note.channel;
           int note = ev->data.note.note;
           int on = ev->type == SNDRV_SEQ_EVENT_NOTEON && ev->data.note.velocity > 0;
+          if ((ch == 0 || ch == 1) &&
+              (note == ERGO_JOG_TOUCH || note == ERGO_JOG_TOUCH_ALT)) {
+               unsigned mask = 1u << (note - ERGO_JOG_TOUCH);
+               unsigned before = jog_touch_down[ch];
+               unsigned after = on ? before | mask : before & ~mask;
+               jog_touch_down[ch] = after;
+               if (!!before != !!after)
+                    send_rx_key(0x430e, after ? OP_PRESS : OP_RELEASE, ch + 1, 0);
+               return 1;
+          }
           if ((ch == ERGO_FX1 || ch == ERGO_FX2) &&
               (note == ERGO_FX_ON || (note >= 71 && note <= 73))) {
                if (ch == ERGO_FX1 && note == ERGO_FX_ON && on != fx_on_down) {
@@ -292,11 +309,20 @@ static int ergo_event(const struct snd_seq_event *ev)
           }
           if (ch == ERGO_MIX && note >= 76 && note <= 83) {
                if ((note <= 78 || note == 80) && on != fx_target_down[note - 76]) {
-                    static const int targets[] = {0, 1, 5, 0, 5};
                     fx_target_down[note - 76] = on;
                     if (on) {
-                         __atomic_store_n(&fx_target_led, note, __ATOMIC_RELAXED);
-                         send_rx_key(0x448e, 4, 0, targets[note - 76]);
+                         int target, led_mask;
+                         if ((note == 76 || note == 80) &&
+                             fx_target_down[0] && fx_target_down[4]) {
+                              target = 5;
+                              led_mask = (1 << 0) | (1 << 4);
+                         } else {
+                              static const int targets[] = {0, 1, 5, 0, 1};
+                              target = targets[note - 76];
+                              led_mask = 1 << (note - 76);
+                         }
+                         __atomic_store_n(&fx_target_led, led_mask, __ATOMIC_RELAXED);
+                         send_rx_key(0x448e, 4, 0, target);
                     }
                }
                return 1;
@@ -329,18 +355,18 @@ static void ergo_tick(void)
      int leds = rx_panel_leds();
      int force = (++panel_led_ticks % 5) == 0;
      int target = __atomic_load_n(&fx_target_led, __ATOMIC_RELAXED);
-     static const int channels[] = {6, 6, 0, 1, 4, 4, 4, 6, 6, 6, 6};
-     static const int notes[] = {84, 85, 88, 88, 67, 71, 72, 76, 77, 78, 80};
-     for (int i = 0; i < 11; i++) {
+     static const int channels[] = {6, 6, 0, 1, 4, 4, 4, 6, 6, 6, 6, 0, 0, 1, 1, 0, 1};
+     static const int notes[] = {84, 85, 88, 88, 67, 71, 72, 76, 77, 78, 80, 16, 17, 16, 17, 26, 26};
+     for (int i = 0; i < 17; i++) {
           int on;
-          if (i < 5) {
+          if (i < 5 || i >= 11) {
                if (leds < 0)
                     continue;
-               on = (leds >> i) & 1;
+               on = (leds >> (i < 5 ? i : i - 6)) & 1;
           } else if (i < 7) {
                on = __atomic_load_n(&fx_select_led[i - 5], __ATOMIC_RELAXED);
           } else {
-               on = target == notes[i];
+               on = (target & (1 << (notes[i] - 76))) != 0;
           }
           if ((force || panel_led_last[i] != on) &&
               midi_note(channels[i], notes[i], on ? 127 : 0))

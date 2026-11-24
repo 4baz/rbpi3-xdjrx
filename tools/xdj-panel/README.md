@@ -45,7 +45,8 @@ Notes:
 - RX browser rotation and browse push have been checked against the Pi display.
   Other controls, including source buttons, require further verification.
 - With the DDJ-ERGO RX map, FUNCTION/REC opens Browse. Deck C/D switch the
-  controller's own deck layer; use A/B for RX decks.
+  controller's own deck layer; use A/B for RX decks. SHIFT + FUNCTION/REC
+  toggles RX QUANTIZE.
 - The ERGO MASTER knob controls RX master volume through the RX mixer. This is
   separate from the FLX4 hardware-output volume mapping and has been confirmed
   on the Pi.
@@ -57,20 +58,30 @@ Notes:
   confirmed on the Pi. The cue LEDs mirror the RX panel's reported LED state.
 - The ERGO SYNC LEDs mirror the RX panel's per-deck SYNC state, including
   flashing. Hardware verification is still needed.
+- The ERGO KEYLOCK buttons control RX MASTER TEMPO on their respective decks;
+  their LEDs mirror the RX panel's MASTER TEMPO indicators. LED behavior still
+  needs hardware verification.
 - The ERGO does not currently have a verified startup position query. Move each
   fader and knob to synchronize it after startup; until then the RX uses its
   own values, which may not match the controller's physical positions.
 - The ERGO tempo faders and jogs use RX-specific events; their physical direction,
   jog sensitivity and scratching still need confirmation on the Pi. `TEMPO_REV`
   and `JOG_REV` reverse their respective directions if needed.
+- Both ERGO platter-touch notes are mapped to RX jog touch on decks A and B.
+  Their effect on scratching during playback still needs hardware verification.
 - The ERGO AUTO LOOP knob selects 1/32–32 beats (default 4) while inactive;
   press it to start or exit a loop. While looping, clockwise doubles and
   counterclockwise halves the active loop. The remembered selection may differ
   from a loop made with other controls. Activation, exit and rotation direction
   have been confirmed on the Pi.
-- The ERGO FX1 ON button and MIX knob send the RX Beat FX on/off and level/depth
-  events. The FX1 channel 1, 2 and 3 assignment buttons select deck 1, deck 2
-  and master; the physical FX2 assignment button also selects master. FX1
+- The ERGO's LOOP IN and LOOP OUT LEDs on both decks mirror the RX panel
+  indicators, including blinking during a loop.
+- The ERGO FX1 ON button controls RX Beat FX on/off. Deck A's FILTER knob
+  controls the shared Beat FX level/depth over its full travel: its center is
+  approximately 50%, not a neutral filter position. FX1 CONTROL is unmapped on
+  RX. On deck A, FX1 selects channel 1 and FX2 selects channel 2; holding
+  both together selects master. The selection remains after release. The other
+  FX1 assignment buttons retain their deck 2 and master mappings. FX1
   parameter buttons 1 and 2 select the previous and next of eight RX effects.
   Their first press after startup selects the first effect because the current RX
   selection cannot yet be read; changing it elsewhere may desynchronize the
@@ -78,9 +89,9 @@ Notes:
   Other FX1 parameter controls, its fourth assignment button and the FX2 effects
   section are not mapped on RX; their RX3 mappings are suppressed.
 - The FX1 ON LED mirrors the RX Beat FX indicator, including its blink. FX1
-  parameter button LEDs light while held. The most recently pressed mapped FX
-  assignment button stays lit; this is controller-side history, not live RX
-  state, and starts unlit after a restart.
+  parameter button LEDs light while held. The selected assignment stays lit,
+  with both deck A FX buttons lit for the master chord. This is controller-side
+  history, not live RX state, and starts unlit after a restart.
 - The legacy `sweep_pi_paneldbg.py` checks the direct-key bridge and does not
   validate the RX frame transport.
 
