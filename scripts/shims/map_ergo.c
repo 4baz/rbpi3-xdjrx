@@ -53,6 +53,8 @@ enum {
      ERGO_DECK_CD = 114,
      ERGO_LOOP_PRESS = 20,
      ERGO_LOOP_TURN = 19,
+     ERGO_BEAT_PREV = 64,
+     ERGO_BEAT_NEXT = 66,
      ERGO_VINYL = 21,
      ERGO_JOG_TOUCH = 54,
      ERGO_JOG_TOUCH_ALT = 55,
@@ -67,11 +69,12 @@ enum {
 static int loop_size[2] = { 7, 7 };
 static int loop_down[2];
 static unsigned jog_touch_down[2];
+static unsigned hotcue_down[2], hotcue_shift_down[2];
 static int fx_mix_msb, fx_mix_lsb, fx_mix_last, fx_on_down;
 static int fx_target_down[8];
 static int fx_select_down[2], fx_select_pos;
 static int fx_select_led[2], fx_target_led;
-static int panel_led_last[17];
+static int panel_led_last[33];
 static unsigned panel_led_ticks;
 static int panel_led_disabled;
 static const struct { unsigned short beats, divisor; } loop_sizes[] = {
@@ -84,6 +87,8 @@ static void ergo_reset(void)
      loop_size[0] = loop_size[1] = 7;
      loop_down[0] = loop_down[1] = 0;
      jog_touch_down[0] = jog_touch_down[1] = 0;
+     hotcue_down[0] = hotcue_down[1] = 0;
+     hotcue_shift_down[0] = hotcue_shift_down[1] = 0;
      fx_mix_msb = -1;
      fx_mix_lsb = 0;
      fx_mix_last = -1;
@@ -96,7 +101,7 @@ static void ergo_reset(void)
      }
      for (int i = 0; i < 8; i++)
           fx_target_down[i] = 0;
-     for (int i = 0; i < 17; i++)
+     for (int i = 0; i < 33; i++)
           panel_led_last[i] = -1;
      panel_led_ticks = 0;
      panel_led_disabled = env_on("LED_DISABLE", 0);
@@ -276,6 +281,46 @@ static int ergo_event(const struct snd_seq_event *ev)
           int ch = ev->data.note.channel;
           int note = ev->data.note.note;
           int on = ev->type == SNDRV_SEQ_EVENT_NOTEON && ev->data.note.velocity > 0;
+          if (ch == 0 && (note == ERGO_BEAT_PREV || note == ERGO_BEAT_NEXT)) {
+               /* RX native keys, found by probing; the RX3's 0x4490/0x4491 do nothing here. */
+               if (on)
+                    send_rx_key_fl(note == ERGO_BEAT_NEXT ? 0x4494 : 0x4493,
+                                   OP_PRESS, CH_GLOBAL, 1, 0.0f, 0);
+               return 1;
+          }
+          if ((ch == 0 || ch == 1) &&
+              ((note >= 46 && note <= 49) || (note >= 95 && note <= 98))) {
+               int shifted = note >= 95;
+               int pad = note - (shifted ? 95 : 46);
+               unsigned bit = 1u << pad;
+               unsigned *held = shifted ? &hotcue_shift_down[ch] : &hotcue_down[ch];
+               if (on && !(*held & bit)) {
+                    int leds = rx_panel_leds();
+                    if (leds < 0) {
+                         klog("knobshim2: ERGO hot cue deck%d: RX panel state unavailable\n", ch + 1);
+                         return 1;
+                    }
+                    if ((shifted && hotcue_down[ch]) || (!shifted && hotcue_shift_down[ch])) {
+                         klog("knobshim2: ERGO hot cue deck%d: conflicting shifted pad held\n", ch + 1);
+                         return 1;
+                    }
+                    if (!(hotcue_down[ch] | hotcue_shift_down[ch]) &&
+                        !(leds & (ch ? RX_PANEL_HOT_CUE_MODE_2 : RX_PANEL_HOT_CUE_MODE_1))) {
+                         send_rx_key(0x4113, OP_PRESS, ch + 1, 0);
+                         send_rx_key(0x4113, OP_RELEASE, ch + 1, 0);
+                    }
+                    if (shifted && !hotcue_shift_down[ch])
+                         send_rx_key(0x4103, OP_PRESS, ch + 1, 0);
+                    *held |= bit;
+                    send_rx_key(0x4117 + pad, OP_PRESS, ch + 1, 0);
+               } else if (!on && (*held & bit)) {
+                    *held &= ~bit;
+                    send_rx_key(0x4117 + pad, OP_RELEASE, ch + 1, 0);
+                    if (shifted && !hotcue_shift_down[ch])
+                         send_rx_key(0x4103, OP_RELEASE, ch + 1, 0);
+               }
+               return 1;
+          }
           if ((ch == 0 || ch == 1) &&
               (note == ERGO_JOG_TOUCH || note == ERGO_JOG_TOUCH_ALT)) {
                unsigned mask = 1u << (note - ERGO_JOG_TOUCH);
@@ -355,14 +400,21 @@ static void ergo_tick(void)
      int leds = rx_panel_leds();
      int force = (++panel_led_ticks % 5) == 0;
      int target = __atomic_load_n(&fx_target_led, __ATOMIC_RELAXED);
-     static const int channels[] = {6, 6, 0, 1, 4, 4, 4, 6, 6, 6, 6, 0, 0, 1, 1, 0, 1};
-     static const int notes[] = {84, 85, 88, 88, 67, 71, 72, 76, 77, 78, 80, 16, 17, 16, 17, 26, 26};
-     for (int i = 0; i < 17; i++) {
+     static const int channels[] = {6, 6, 0, 1, 4, 4, 4, 6, 6, 6, 6, 0, 0, 1, 1, 0, 1,
+                                    0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1};
+     static const int notes[] = {84, 85, 88, 88, 67, 71, 72, 76, 77, 78, 80, 16, 17, 16, 17, 26, 26,
+                                 46, 47, 48, 49, 46, 47, 48, 49,
+                                 95, 96, 97, 98, 95, 96, 97, 98};
+     for (int i = 0; i < 33; i++) {
           int on;
           if (i < 5 || i >= 11) {
                if (leds < 0)
                     continue;
-               on = (leds >> (i < 5 ? i : i - 6)) & 1;
+               int bit = i < 5 ? i : i < 25 ? i - 6 : i - 14;
+               on = (leds >> bit) & 1;
+               if (i >= 17 &&
+                   !(leds & (channels[i] == 0 ? RX_PANEL_HOT_CUE_MODE_1 : RX_PANEL_HOT_CUE_MODE_2)))
+                    on = 0;
           } else if (i < 7) {
                on = __atomic_load_n(&fx_select_led[i - 5], __ATOMIC_RELAXED);
           } else {

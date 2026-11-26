@@ -26,5 +26,15 @@ int rx_panel_led_decode(const uint8_t *frame, size_t length)
            ((frame[7] & 0x40) ? 0 : RX_PANEL_LOOP_IN_2) |
            ((frame[7] & 0x20) ? 0 : RX_PANEL_LOOP_OUT_2) |
            ((frame[3] & 0x08) ? RX_PANEL_MASTER_TEMPO_1 : 0) |
-           ((frame[7] & 0x08) ? RX_PANEL_MASTER_TEMPO_2 : 0);
+           ((frame[7] & 0x08) ? RX_PANEL_MASTER_TEMPO_2 : 0) |
+           ((frame[2] & 0x80) ? RX_PANEL_HOT_CUE_A_1 : 0) |
+           ((frame[2] & 0x40) ? RX_PANEL_HOT_CUE_B_1 : 0) |
+           ((frame[2] & 0x20) ? RX_PANEL_HOT_CUE_C_1 : 0) |
+           ((frame[2] & 0x10) ? RX_PANEL_HOT_CUE_D_1 : 0) |
+           ((frame[6] & 0x80) ? RX_PANEL_HOT_CUE_A_2 : 0) |
+           ((frame[6] & 0x40) ? RX_PANEL_HOT_CUE_B_2 : 0) |
+           ((frame[6] & 0x20) ? RX_PANEL_HOT_CUE_C_2 : 0) |
+           ((frame[6] & 0x10) ? RX_PANEL_HOT_CUE_D_2 : 0) |
+           ((frame[2] & 0x04) ? RX_PANEL_HOT_CUE_MODE_1 : 0) |
+           ((frame[6] & 0x04) ? RX_PANEL_HOT_CUE_MODE_2 : 0);
 }

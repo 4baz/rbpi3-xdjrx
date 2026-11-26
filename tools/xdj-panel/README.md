@@ -76,6 +76,13 @@ Notes:
   have been confirmed on the Pi.
 - The ERGO's LOOP IN and LOOP OUT LEDs on both decks mirror the RX panel
   indicators, including blinking during a loop.
+- The four ERGO hot cue buttons on each deck select RX HOT CUE mode if needed,
+  then set or play cues A–D. Their LEDs mirror the RX pad indicators in HOT CUE
+  mode and are dark in other modes. SHIFT + button sends the RX delete gesture.
+  Leave the 3.00 mod's **HOT CUE E-H** setting OFF: when enabled, SHIFT + pad
+  can play E–H instead of deleting A–D. Hardware verification is still needed.
+- The ERGO deck A buttons on notes 64 and 66 step the RX Beat FX beat fraction:
+  64 is `<` (RX key 0x4493), 66 is `>` (0x4494).
 - The ERGO FX1 ON button controls RX Beat FX on/off. Deck A's FILTER knob
   controls the shared Beat FX level/depth over its full travel: its center is
   approximately 50%, not a neutral filter position. FX1 CONTROL is unmapped on

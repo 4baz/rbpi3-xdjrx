@@ -109,7 +109,7 @@
 
 static int checks, failures;
 static int led_sent_n;
-static int led_sent_ch[32], led_sent_note[32], led_sent_value[32];
+static int led_sent_ch[64], led_sent_note[64], led_sent_value[64];
 static int led_send_ok = 1;
 static int rx_test_panel_leds = -1;
 int rx_panel_leds(void) { return rx_test_panel_leds; }
@@ -118,7 +118,7 @@ int midi_note(int ch, int note, int value)
 {
      if (!led_send_ok)
           return 0;
-     if (led_sent_n < 32) {
+     if (led_sent_n < 64) {
           led_sent_ch[led_sent_n] = ch;
           led_sent_note[led_sent_n] = note;
           led_sent_value[led_sent_n] = value;
@@ -129,25 +129,16 @@ int midi_note(int ch, int note, int value)
 
 static int led_sent_value_for(int channel, int note)
 {
-     int last = led_sent_n < 32 ? led_sent_n : 32;
+     int last = led_sent_n < 64 ? led_sent_n : 64;
      for (int i = last - 1; i >= 0; i--)
           if (led_sent_ch[i] == channel && led_sent_note[i] == note)
                return led_sent_value[i];
      return -1;
 }
 
-static void rx_tx_frame(unsigned char frame[24], int cue, int sync, int fx_on, int loops, int mt)
+static void rx_tx_crc(unsigned char frame[24])
 {
      unsigned crc = 0xffff;
-     memset(frame, 0, 24);
-     frame[10] = cue;
-     frame[1] = (sync & 1) ? 0x40 : 0;
-     frame[5] = (sync & 2) ? 0x40 : 0;
-     frame[3] = ((loops & 1) ? 0 : 0x40) | ((loops & 2) ? 0 : 0x20) |
-                ((mt & 1) ? 0x08 : 0);
-     frame[7] = ((loops & 4) ? 0 : 0x40) | ((loops & 8) ? 0 : 0x20) |
-                ((mt & 2) ? 0x08 : 0);
-     frame[19] = fx_on ? 0 : 0x40;
      for (int i = 0; i < 20; i += 4) {
           for (int j = 3; j >= 0; j--) {
                crc ^= frame[i + j];
@@ -158,6 +149,20 @@ static void rx_tx_frame(unsigned char frame[24], int cue, int sync, int fx_on, i
      crc ^= 0xffff;
      frame[22] = crc & 0xff;
      frame[23] = crc >> 8;
+}
+
+static void rx_tx_frame(unsigned char frame[24], int cue, int sync, int fx_on, int loops, int mt)
+{
+     memset(frame, 0, 24);
+     frame[10] = cue;
+     frame[1] = (sync & 1) ? 0x40 : 0;
+     frame[5] = (sync & 2) ? 0x40 : 0;
+     frame[3] = ((loops & 1) ? 0 : 0x40) | ((loops & 2) ? 0 : 0x20) |
+                ((mt & 1) ? 0x08 : 0);
+     frame[7] = ((loops & 4) ? 0 : 0x40) | ((loops & 8) ? 0 : 0x20) |
+                ((mt & 2) ? 0x08 : 0);
+     frame[19] = fx_on ? 0 : 0x40;
+     rx_tx_crc(frame);
 }
 
 #define CHECK(cond, ...) do {                                       \
@@ -1488,7 +1493,7 @@ int main(void)
           CHECK(led_sent_n == 0, "failed LED sends must not be cached");
           led_send_ok = 1;
           map_ergo.tick();
-          CHECK(led_sent_n == 17 && led_sent_ch[0] == 6 &&
+          CHECK(led_sent_n == 33 && led_sent_ch[0] == 6 &&
                 led_sent_note[0] == 84 && led_sent_value[0] == 127 &&
                 led_sent_ch[1] == 6 && led_sent_note[1] == 85 &&
                 led_sent_value[1] == 0 &&
@@ -1514,7 +1519,7 @@ int main(void)
           map_ergo.tick();
           CHECK(led_sent_n == 0, "unchanged RX LEDs must not be resent on every tick");
           map_ergo.tick();
-          CHECK(led_sent_n == 17, "RX LEDs must be periodically resent");
+          CHECK(led_sent_n == 33, "RX LEDs must be periodically resent");
           rx_tx_frame(frame, 0x30, 3, 0, 0, 0);
           CHECK(rx_panel_led_decode(frame, sizeof frame) ==
                 (RX_PANEL_CUE_1 | RX_PANEL_CUE_2 | RX_PANEL_SYNC_1 | RX_PANEL_SYNC_2),
@@ -1573,7 +1578,104 @@ int main(void)
           map_ergo.tick();
           CHECK(led_sent_value_for(0, 26) == 0 && led_sent_value_for(1, 26) == 0,
                 "both keylock LEDs must turn off with master tempo");
+          for (int deck = 0; deck < 2; deck++) {
+               for (int pad = 0; pad < 4; pad++) {
+                    rx_tx_frame(frame, 0, 0, 0, 0, 0);
+                    frame[deck ? 6 : 2] = 0x80 >> pad;
+                    rx_tx_crc(frame);
+                    CHECK(rx_panel_led_decode(frame, sizeof frame) ==
+                          (RX_PANEL_HOT_CUE_A_1 << (deck * 4 + pad)),
+                          "RX deck %d hot cue %d LED must decode independently", deck, pad);
+               }
+          }
+          rx_tx_frame(frame, 0, 0, 0, 0, 0);
+          frame[2] = 0xa4;
+          frame[6] = 0x54;
+          rx_tx_crc(frame);
+          rx_test_panel_leds = rx_panel_led_decode(frame, sizeof frame);
+          led_sent_n = 0;
+          map_ergo.tick();
+          CHECK(led_sent_value_for(0, 46) == 127 && led_sent_value_for(0, 48) == 127 &&
+                led_sent_value_for(1, 47) == 127 && led_sent_value_for(1, 49) == 127 &&
+                led_sent_value_for(0, 95) == 127 && led_sent_value_for(1, 98) == 127,
+                "RX hot cue LEDs must follow independent decks and pads");
+          frame[2] = 0xa0;
+          rx_tx_crc(frame);
+          rx_test_panel_leds = rx_panel_led_decode(frame, sizeof frame);
+          led_sent_n = 0;
+          map_ergo.tick();
+          CHECK(led_sent_value_for(0, 46) == 0 && led_sent_value_for(0, 48) == 0,
+                "non-hot-cue pad indicators must not be shown as hot cues");
           rx_test_panel_leds = -1;
+     }
+     for (int channel = 0; channel < 2; channel++) {
+          struct snd_seq_event ev = {0};
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = channel;
+          ev.data.note.velocity = 127;
+          rx_test_panel_leds = channel ? RX_PANEL_HOT_CUE_MODE_2 : RX_PANEL_HOT_CUE_MODE_1;
+          for (int pad = 0; pad < 4; pad++) {
+               ev.data.note.note = 46 + pad;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               map_ergo.event(&ev);
+               ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 2 && sent[0].key == 0x4117 + pad &&
+                     sent[0].op == OP_PRESS && sent[0].ch == channel + 1 &&
+                     sent[1].key == 0x4117 + pad && sent[1].op == OP_RELEASE,
+                     "ERGO deck %d hot cue %d press/release", channel, pad);
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+               ev.data.note.note = 95 + pad;
+               sent_n = 0;
+               map_ergo.event(&ev);
+               ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+               map_ergo.event(&ev);
+               CHECK(sent_n == 4 && sent[0].key == 0x4103 && sent[0].op == OP_PRESS &&
+                     sent[1].key == 0x4117 + pad && sent[1].op == OP_PRESS &&
+                     sent[2].key == 0x4117 + pad && sent[2].op == OP_RELEASE &&
+                     sent[3].key == 0x4103 && sent[3].op == OP_RELEASE &&
+                     sent[0].ch == channel + 1 && sent[1].ch == channel + 1,
+                     "ERGO deck %d SHIFT hot cue %d must send RX delete gesture", channel, pad);
+               ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          }
+          rx_test_panel_leds = 0;
+          ev.data.note.note = 46;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 3 && sent[0].key == 0x4113 && sent[0].op == OP_PRESS &&
+                sent[1].key == 0x4113 && sent[1].op == OP_RELEASE &&
+                sent[2].key == 0x4117 && sent[2].op == OP_PRESS,
+                "ERGO deck %d must select hot cue mode before pad", channel);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          rx_test_panel_leds = channel ? RX_PANEL_HOT_CUE_MODE_2 : RX_PANEL_HOT_CUE_MODE_1;
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.note = 95;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          ev.data.note.note = 96;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          ev.data.note.note = 95;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 4 && sent[0].key == 0x4103 &&
+                sent[1].key == 0x4117 && sent[2].key == 0x4118 &&
+                sent[3].key == 0x4117 && sent[3].op == OP_RELEASE,
+                "overlapping shifted hot cues must keep RX SHIFT held");
+          ev.data.note.note = 96;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 6 && sent[4].key == 0x4118 && sent[4].op == OP_RELEASE &&
+                sent[5].key == 0x4103 && sent[5].op == OP_RELEASE,
+                "RX SHIFT must release after the last shifted hot cue");
+          rx_test_panel_leds = -1;
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.note = 46;
+          sent_n = 0;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 0, "unknown RX mode must not trigger an unintended pad action");
      }
      {
           struct snd_seq_event ev = {0};
@@ -1835,6 +1937,27 @@ int main(void)
           CHECK(sent_n == 2 && sent[1].key == 0x430e &&
                 sent[1].op == OP_RELEASE && sent[1].ch == channel + 1,
                 "ERGO deck %d must release jog after both touch notes clear", channel);
+     }
+     {
+          struct snd_seq_event ev = {0};
+          sent_n = 0;
+          ev.data.note.velocity = 127;
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.note = 66;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.note = 64;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEOFF;
+          map_ergo.event(&ev);
+          ev.type = SNDRV_SEQ_EVENT_NOTEON;
+          ev.data.note.channel = 1;
+          map_ergo.event(&ev);
+          CHECK(sent_n == 2 && sent[0].key == 0x4494 && sent[0].op == OP_PRESS &&
+                sent[1].key == 0x4493 && sent[1].op == OP_PRESS,
+                "ERGO deck A notes 66/64 must step beat fraction next/prev only");
      }
      for (int channel = 0; channel < 2; channel++) {
           static const struct { int msb, lsb, neg, positive; float norm; } positions[] = {

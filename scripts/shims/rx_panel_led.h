@@ -16,6 +16,16 @@ enum {
     RX_PANEL_LOOP_OUT_2 = 1 << 8,
     RX_PANEL_MASTER_TEMPO_1 = 1 << 9,
     RX_PANEL_MASTER_TEMPO_2 = 1 << 10,
+    RX_PANEL_HOT_CUE_A_1 = 1 << 11,
+    RX_PANEL_HOT_CUE_B_1 = 1 << 12,
+    RX_PANEL_HOT_CUE_C_1 = 1 << 13,
+    RX_PANEL_HOT_CUE_D_1 = 1 << 14,
+    RX_PANEL_HOT_CUE_A_2 = 1 << 15,
+    RX_PANEL_HOT_CUE_B_2 = 1 << 16,
+    RX_PANEL_HOT_CUE_C_2 = 1 << 17,
+    RX_PANEL_HOT_CUE_D_2 = 1 << 18,
+    RX_PANEL_HOT_CUE_MODE_1 = 1 << 19,
+    RX_PANEL_HOT_CUE_MODE_2 = 1 << 20,
 };
 
 int rx_panel_led_decode(const uint8_t *frame, size_t length);
